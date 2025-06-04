@@ -20,6 +20,7 @@ type AuthContextType = {
   loading: boolean;
   error: string | null;
   clearError: () => void;
+  apiUrl?: "http://192.168.56.1:3000"; // Add this line
   // Add this line
 };
 
@@ -49,7 +50,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren<{}>> = ({
 
         if (token) {
           const response = await axios.get(
-            "http://10.19.60.241:3000/verify-token",
+            "http://192.168.8.102:3000/verify-token",
             {
               headers: { Authorization: `Bearer ${token}` },
             }
@@ -76,7 +77,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren<{}>> = ({
       setLoading(true);
       setError(null);
 
-      const response = await axios.post("http://10.19.60.241:3000/login", {
+      const response = await axios.post("http://192.168.8.102:3000/login", {
         telefono,
         contraseña,
       });

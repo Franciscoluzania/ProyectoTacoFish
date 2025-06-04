@@ -9,19 +9,30 @@ interface Platillo {
   cantidad?: number;
 }
 
+interface PlatilloEnCarrito {
+  id: number;
+  nombre: string;
+  descripcion: string;
+  precio: number;
+  imagen: { uri: string }; // ← ya formateada
+  cantidad?: number;
+}
+
 interface CarritoContextType {
-  carrito: Platillo[];
-  agregarAlCarrito: (platillo: Platillo) => void;
+  carrito: PlatilloEnCarrito[];
+  agregarAlCarrito: (platillo: PlatilloEnCarrito) => void;
   quitarDelCarrito: (id: number) => void;
   limpiarCarrito: () => void;
+  incrementarCantidad: (id: number) => void;
+  decrementarCantidad: (id: number) => void; // Add this line
 }
 
 const CarritoContext = createContext<CarritoContextType | undefined>(undefined);
 
 export const CarritoProvider = ({ children }: { children: ReactNode }) => {
-  const [carrito, setCarrito] = useState<Platillo[]>([]);
+  const [carrito, setCarrito] = useState<PlatilloEnCarrito[]>([]);
 
-  const agregarAlCarrito = (platillo: Platillo) => {
+  const agregarAlCarrito = (platillo: PlatilloEnCarrito) => {
     setCarrito((prev) => {
       const existente = prev.find((item) => item.id === platillo.id);
       if (existente) {
@@ -43,10 +54,31 @@ export const CarritoProvider = ({ children }: { children: ReactNode }) => {
   const limpiarCarrito = () => {
     setCarrito([]);
   };
+  const incrementarCantidad = (id: number) => {
+    setCarrito((prev) => {
+      return prev.map((item) =>
+        item.id === id ? { ...item, cantidad: (item.cantidad || 1) + 1 } : item
+      );
+    });
+  };
 
+  const decrementarCantidad = (id: number) => {
+    setCarrito((prev) => {
+      return prev.map((item) =>
+        item.id === id ? { ...item, cantidad: (item.cantidad || 1) - 1 } : item
+      );
+    });
+  };
   return (
     <CarritoContext.Provider
-      value={{ carrito, agregarAlCarrito, quitarDelCarrito, limpiarCarrito }}
+      value={{
+        carrito,
+        agregarAlCarrito,
+        quitarDelCarrito,
+        limpiarCarrito,
+        incrementarCantidad,
+        decrementarCantidad,
+      }}
     >
       {children}
     </CarritoContext.Provider>

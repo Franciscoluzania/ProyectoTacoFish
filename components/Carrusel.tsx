@@ -1,83 +1,53 @@
-import React from "react";
-import { View, Text, Image, ScrollView, StyleSheet } from "react-native";
+import React, { useEffect, useState } from "react";
+import {
+  View,
+  Text,
+  Image,
+  ScrollView,
+  StyleSheet,
+  ActivityIndicator,
+} from "react-native";
 import { Rating } from "react-native-ratings";
 
-// Objeto de imágenes
-const PLATILLOS_IMAGENES = {
-  // Tacos
-  "taco_master.jpg": require("../assets/images/platillos/taco_master.jpg"),
-
-  // Mariscos
-  "camaron_empanizado.jpg": require("../assets/images/platillos/camaron_empanizado.jpg"),
-
-  // Aguachiles
-  "aguachile_negro.jpg": require("../assets/images/platillos/aguachile_negro.jpg"),
-
-  // Hamburguesas
-  "hamburguesa_camaron.jpg": require("../assets/images/platillos/hamburguesa_camaron.jpg"),
-
-  // Cocteles
-  "el_brujo.jpg": require("../assets/images/platillos/el_brujo.jpg"),
-
-  // Imagen por defecto
-  "default.jpg": require("../assets/images/platillos/default.jpg"),
-};
-
-// Datos de los platillos
-const PLATILLOS_EJEMPLO = [
-  {
-    id: 1,
-    nombre: "Taco Master",
-    imagen: "taco_master.jpg",
-    calificacion: 4.5,
-    precio: "$120",
-    descripcion:
-      "Taco con carne de res, lechuga, tomate y salsa especial de la casa",
-    categoria: "Tacos",
-  },
-  {
-    id: 2,
-    nombre: "Camarón Empanizado",
-    imagen: "camaron_empanizado.jpg",
-    calificacion: 4.8,
-    precio: "$150",
-    descripcion:
-      "Camarones empanizados crujientes con salsa de mostaza y limón",
-    categoria: "Mariscos",
-  },
-  {
-    id: 3,
-    nombre: "Aguachile Negro",
-    imagen: "aguachile_negro.jpg",
-    calificacion: 4.3,
-    precio: "$180",
-    descripcion:
-      "Aguachile con un toque especial de tinta de pulpo y chile serrano",
-    categoria: "Aguachiles",
-  },
-  {
-    id: 4,
-    nombre: "Hamburguesa Camarón",
-    imagen: "hamburguesa_camaron.jpg",
-    calificacion: 4.7,
-    precio: "$110",
-    descripcion:
-      "Hamburguesa con camarones empanizados, aguacate y vegetales frescos",
-    categoria: "Hamburguesas",
-  },
-  {
-    id: 5,
-    nombre: "Cóctel El Brujo",
-    imagen: "el_brujo.jpg",
-    calificacion: 4.9,
-    precio: "$95",
-    descripcion:
-      "Cóctel especial con mezcla de mariscos frescos y salsa secreta",
-    categoria: "Cocteles",
-  },
-];
+interface Platillo {
+  id: number;
+  nombre: string;
+  descripcion: string;
+  precio: number;
+  promedio_calificacion: number;
+  numero_calificaciones: number;
+  imagen: string; // Base64
+}
 
 const Carrusel = () => {
+  const [platillos, setPlatillos] = useState<Platillo[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const obtenerPlatillos = async () => {
+      try {
+        const response = await fetch("http://10.19.100.95/platillos/mejores");
+        const data = await response.json();
+        setPlatillos(data);
+      } catch (error) {
+        console.error("Error al cargar los platillos:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    obtenerPlatillos();
+  }, []);
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#e67e22" />
+        <Text>Cargando platillos destacados...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.titulo}>Platillos Destacados ⭐</Text>
@@ -86,33 +56,28 @@ const Carrusel = () => {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.carrusel}
       >
-        {PLATILLOS_EJEMPLO.map((platillo) => (
+        {platillos.map((platillo) => (
           <View key={platillo.id} style={styles.tarjeta}>
             <Image
-              source={
-                PLATILLOS_IMAGENES?.[
-                  platillo.imagen as keyof typeof PLATILLOS_IMAGENES
-                ] ?? PLATILLOS_IMAGENES["default.jpg"]
-              }
+              source={{ uri: platillo.imagen }}
               style={styles.imagen}
               resizeMode="cover"
             />
             <View style={styles.contenido}>
-              <Text style={styles.categoria}>{platillo.categoria}</Text>
               <Text style={styles.nombre}>{platillo.nombre}</Text>
-              <Text style={styles.precio}>{platillo.precio}</Text>
+              <Text style={styles.precio}>${platillo.precio.toFixed(2)}</Text>
               <View style={styles.ratingContainer}>
                 <Rating
                   type="star"
                   ratingCount={5}
                   imageSize={20}
                   readonly
-                  startingValue={platillo.calificacion}
+                  startingValue={platillo.promedio_calificacion}
                   tintColor="#f8f8f8"
                   ratingBackgroundColor="#c8c7c8"
                 />
                 <Text style={styles.calificacionText}>
-                  {platillo.calificacion.toFixed(1)}
+                  {platillo.promedio_calificacion.toFixed(1)}
                 </Text>
               </View>
               <Text style={styles.descripcion} numberOfLines={2}>
@@ -165,13 +130,6 @@ const styles = StyleSheet.create({
   contenido: {
     padding: 15,
   },
-  categoria: {
-    fontSize: 12,
-    color: "#7f8c8d",
-    marginBottom: 5,
-    fontWeight: "600",
-    textTransform: "uppercase",
-  },
   nombre: {
     fontSize: 18,
     fontWeight: "700",
@@ -199,6 +157,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#7f8c8d",
     lineHeight: 18,
+  },
+  loadingContainer: {
+    padding: 20,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
 

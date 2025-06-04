@@ -41,6 +41,7 @@
     "expo-system-ui": "~4.0.8",
     "expo-web-browser": "~14.0.2",
     "express": "^4.21.2",
+    "image-picker": "^0.3.1",
     "jsonwebtoken": "^9.0.2",
     "jwt-decode": "^4.0.0",
     "lottie-react-native": "^7.2.2",
@@ -52,6 +53,7 @@
     "react-native-animatable": "^1.4.0",
     "react-native-gesture-handler": "~2.20.2",
     "react-native-get-random-values": "~1.11.0",
+    "react-native-image-picker": "^8.2.1",
     "react-native-ratings": "^8.1.0",
     "react-native-reanimated": "~3.16.1",
     "react-native-responsive-dimensions": "^3.1.1",
@@ -62,11 +64,13 @@
     "react-native-web": "~0.19.13",
     "react-native-webview": "13.12.5",
     "react-router-dom": "^7.3.0",
-    "twilio": "^5.5.1"
+    "twilio": "^5.5.1",
+    "expo-image-picker": "~16.0.6"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/jest": "^29.5.12",
+    "@types/lodash": "^4.17.17",
     "@types/react": "~18.3.12",
     "@types/react-native": "^0.72.8",
     "@types/react-native-vector-icons": "^6.4.18",

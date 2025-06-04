@@ -114,7 +114,8 @@ const App = () => {
   return (
     <AuthProvider>
       <CarritoProvider>
-        <HomeTabs /> {/* El NavigationContainer debe estar fuera de este archivo */}
+        <HomeTabs />{" "}
+        {/* El NavigationContainer debe estar fuera de este archivo */}
       </CarritoProvider>
     </AuthProvider>
   );

@@ -1,243 +1,156 @@
-import React, { useState } from "react";
-import {
-  View,
-  Text,
-  Button,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Dimensions,
-  TextInput,
-  Modal,
-  Pressable,
-} from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import React, { useState, useEffect, useCallback } from "react";
+import { View, ScrollView, StyleSheet, Alert } from "react-native";
+import UsuariosModal from "@/screens/Admin/modales/UsuariosModal";
+import PlatillosModal from "@/screens/Admin/modales/PlatillosModal";
+import PedidosModal from "@/screens/Admin/modales/PedidosModal";
+import LogoutModal from "@/screens/Admin/modales/LogoutModal";
+import EditarUsuarioModal from "@/screens/Admin/modales/EditarUsuarios";
+import AdminCard from "@/screens/Admin/modales/AdminCard";
+import LogoutButton from "@/screens/Admin/modales/LogoutButton";
+import { useAuth } from "@/context/AuthContext";
 import { NavigationProp, useNavigation } from "@react-navigation/native";
 import { RootStackParamList } from "@/types/types";
-import { useAuth } from "@/context/AuthContext";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import axios from "axios";
 
+interface Usuario {
+  id: number;
+  nombre: string;
+  contraseña?: string;
+  telefono: string;
+  tipo_usuario: "cliente" | "admin";
+}
 interface PerfilAdminProps {
-  setIsLoggedIn?: (isLoggedIn: boolean) => void;
+  setIsLoggedIn: (isLoggedIn: boolean) => void;
 }
 
 const PerfilAdmin: React.FC<PerfilAdminProps> = ({ setIsLoggedIn }) => {
+  const [modalUsuarios, setModalUsuarios] = useState(false);
+  const [modalPlatillos, setModalPlatillos] = useState(false);
+  const [modalPedidos, setModalPedidos] = useState(false);
+  const [modalLogout, setModalLogout] = useState(false);
+  const [modalEditarUsuario, setModalEditarUsuario] = useState(false);
+  const [usuarioEditando, setUsuarioEditando] = useState<Usuario | null>(null);
+  const [totalUsuarios, setTotalUsuarios] = useState(0);
+  const [totalPlatillos, setTotalPlatillos] = useState(0);
+
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { logout } = useAuth();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [modalVisible, setModalVisible] = useState(false);
+  const apiUrl = "http://192.168.56.1:3000";
 
   const handleLogout = async () => {
     try {
       await AsyncStorage.removeItem("token");
       logout();
-      console.log();
       navigation.reset({
         index: 0,
-        routes: [{ name: "Login" as keyof RootStackParamList }],
+        routes: [{ name: "Login" }],
       });
     } catch (error) {
       console.error("Error al cerrar sesión:", error);
+      Alert.alert("Error", "No se pudo cerrar sesión.");
     }
   };
 
+  const fetchConteos = useCallback(async () => {
+    try {
+      const [usuariosResponse, platillosResponse] = await Promise.all([
+        axios.get<Usuario[]>(`${apiUrl}/usuarios`),
+        axios.get(`${apiUrl}/platillos`),
+      ]);
+
+      setTotalUsuarios(usuariosResponse.data.length);
+      setTotalPlatillos(platillosResponse.data.length);
+    } catch (error) {
+      console.error("Error al cargar conteos:", error);
+      Alert.alert("Error", "No se pudieron cargar los conteos.");
+    }
+  }, [apiUrl]);
+
+  useEffect(() => {
+    fetchConteos();
+  }, [fetchConteos]);
+
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.title}>Perfil del Administrador</Text>
+    <View style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollContainer}>
+        <AdminCard
+          icon="users"
+          title="Usuarios"
+          count={totalUsuarios}
+          onPress={() => setModalUsuarios(true)}
+        />
+        <AdminCard
+          icon="restaurant"
+          title="Platillos"
+          count={totalPlatillos}
+          onPress={() => setModalPlatillos(true)}
+        />
+        <AdminCard
+          icon="receipt"
+          title="Pedidos"
+          count={0}
+          onPress={() => setModalPedidos(true)}
+        />
 
-      <View style={styles.actionsContainer}>
-        <TouchableOpacity style={styles.actionButton}>
-          <Text style={styles.actionButtonText}>Gestionar Pedidos</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton}>
-          <Text style={styles.actionButtonText}>Gestionar Platillos</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton}>
-          <Text style={styles.actionButtonText}>Ver Reseñas</Text>
-        </TouchableOpacity>
-      </View>
+        <LogoutButton onPress={() => setModalLogout(true)} />
+      </ScrollView>
 
-      <Button
-        title="Cerrar Sesión"
-        onPress={() => setModalVisible(true)}
-        color="#FF3B30"
+      <UsuariosModal
+        visible={modalUsuarios}
+        onClose={() => {
+          setModalUsuarios(false);
+          fetchConteos(); // Actualizar conteo después de cerrar modal
+        }}
+        onEditUser={(user: Usuario) => {
+          setUsuarioEditando(user);
+          setModalEditarUsuario(true);
+        }}
+        apiUrl={apiUrl}
       />
 
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <View style={styles.centeredView}>
-          <View style={styles.modalView}>
-            <Text style={styles.modalTitle}>Confirmar cierre de sesión</Text>
-            <Text style={styles.modalText}>
-              ¿Estás seguro que deseas cerrar tu sesión?
-            </Text>
-            <View style={styles.modalButtons}>
-              <Pressable
-                style={[styles.button, styles.buttonCancel]}
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={styles.textStyle}>Cancelar</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.button, styles.buttonConfirm]}
-                onPress={handleLogout}
-              >
-                <Text style={styles.textStyle}>Cerrar Sesión</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </ScrollView>
+      <PlatillosModal
+        visible={modalPlatillos}
+        onClose={() => {
+          setModalPlatillos(false);
+          fetchConteos(); // Actualizar conteo después de cerrar modal
+        }}
+      />
+
+      <PedidosModal
+        visible={modalPedidos}
+        onClose={() => setModalPedidos(false)}
+      />
+
+      <LogoutModal
+        visible={modalLogout}
+        onClose={() => setModalLogout(false)}
+        onLogout={handleLogout}
+      />
+
+      <EditarUsuarioModal
+        visible={modalEditarUsuario}
+        user={usuarioEditando}
+        onClose={() => setModalEditarUsuario(false)}
+        onSave={() => {
+          setModalEditarUsuario(false);
+          fetchConteos(); // Refrescar usuarios si se editó
+        }}
+        apiUrl={apiUrl}
+      />
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F0F4F8",
+    backgroundColor: "#F8F9FA",
+  },
+  scrollContainer: {
     padding: 20,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#2E86C1",
-    textAlign: "center",
-    marginBottom: 20,
-  },
-  searchInput: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 20,
-    fontSize: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
-    elevation: 3,
-  },
-  tableContainer: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 10,
-    padding: 15,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
-    elevation: 3,
-  },
-  tableTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#2E86C1",
-    marginBottom: 10,
-  },
-  tableHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    borderBottomWidth: 1,
-    borderBottomColor: "#D6DBDF",
-    paddingBottom: 10,
-    marginBottom: 10,
-  },
-  headerText: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#2E86C1",
-    flex: 1,
-    textAlign: "center",
-  },
-  tableScrollVertical: {
-    maxHeight: Dimensions.get("window").height * 0.4,
-  },
-  tableRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#D6DBDF",
-  },
-  rowText: {
-    fontSize: 14,
-    color: "#34495E",
-    flex: 1,
-    textAlign: "center",
-  },
-  actionsContainer: {
-    marginBottom: 20,
-  },
-  actionButton: {
-    backgroundColor: "#2E86C1",
-    borderRadius: 10,
-    padding: 15,
+    paddingBottom: 40,
     alignItems: "center",
-    marginBottom: 10,
-  },
-  actionButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  centeredView: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.5)",
-  },
-  modalView: {
-    margin: 20,
-    backgroundColor: "white",
-    borderRadius: 20,
-    padding: 25,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
-    width: "80%",
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 10,
-    color: "#2E86C1",
-  },
-  modalText: {
-    fontSize: 16,
-    marginBottom: 20,
-    textAlign: "center",
-    color: "#34495E",
-  },
-  modalButtons: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    width: "100%",
-  },
-  button: {
-    borderRadius: 10,
-    padding: 12,
-    elevation: 2,
-    width: "48%",
-  },
-  buttonCancel: {
-    backgroundColor: "#D6DBDF",
-  },
-  buttonConfirm: {
-    backgroundColor: "#FF3B30",
-  },
-  textStyle: {
-    color: "white",
-    fontWeight: "bold",
-    textAlign: "center",
   },
 });
 

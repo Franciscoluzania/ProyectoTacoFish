@@ -7,6 +7,16 @@ export type RootStackParamList = {
   Registro: undefined;
   Home: undefined;
   PerfilAdmin: undefined;
+  Carrito: undefined;
+  404: undefined;
+  Platillos: undefined;
+  Menu: undefined;
+  PlatilloDetalle: {
+    platilloId: number;
+    platilloNombre: string;
+  };
+  
+  
   Perfil: undefined;
   Inicio: undefined;
   AdminStack: undefined;

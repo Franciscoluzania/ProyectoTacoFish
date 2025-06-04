@@ -1,43 +1,36 @@
 require("dotenv").config({ path: ".env" });
 const express = require("express");
-const mysql = require("mysql2/promise"); // Cambiado a promise
+const mysql = require("mysql2/promise");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const twilio = require('twilio');
 const os = require('os');
-
-// Configuración de Twilio con validación
-if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
-  console.error("❌ Faltan credenciales de Twilio en .env");
-  process.exit(1);
-}
-
-const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 const app = express();
+
+// Inicialización de Twilio
+const client = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
 
 // Configuración CORS actualizada
 app.use(cors({
-  origin: [
-    'http://localhost:8081',
-    'http://localhost:3000',
-    'http://192.168.56.1:8081',// No mover
-    'http://10.19.100.158:8081',
-    'http://10.19.100.158:3000',
-    'exp://10.19.100.158:8081'
-  ],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  credentials: true
-}));
-
+  origin: ['http://localhost:3000', 'http://localhost:8081'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+}),);
+app.use('/uploads', express.static('C:/ProgramData/MySQL/MySQL Server 8.0/Uploads'));
 app.use(express.json());
-
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 // Configuración de la base de datos MySQL
 const db = mysql.createPool({
-  host: process.env.DB_HOST || "localhost",
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD || "12345",
-  database: process.env.DB_NAME || "tacofish",
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER || "francisco",
+  password: process.env.DB_PASSWORD || "admin123",
+  database: process.env.DB_NAME || "Restaurante",
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
@@ -57,6 +50,29 @@ db.getConnection()
 const SECRET_KEY = process.env.JWT_SECRET || "secreto_super_seguro";
 const verificationCodes = {};
 
+// Middleware de autenticación
+const authenticate = async (req, res, next) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: "Token no proporcionado" });
+    }
+
+    const token = authHeader.split(' ')[1];
+    req.user = jwt.verify(token, SECRET_KEY);
+    next();
+  } catch (error) {
+    console.error("Error en autenticación:", error);
+    if (error.name === "JsonWebTokenError") {
+      return res.status(401).json({ error: "Token inválido" });
+    }
+    if (error.name === "TokenExpiredError") {
+      return res.status(401).json({ error: "Token expirado" });
+    }
+    res.status(500).json({ error: "Error interno del servidor" });
+  }
+};
+
 // Función para formatear teléfono
 const formatPhoneNumber = (phone) => {
   const cleaned = phone.replace(/\D/g, "");
@@ -66,7 +82,7 @@ const formatPhoneNumber = (phone) => {
   return `+52${cleaned}`;
 };
 
-// Ruta de registro corregida
+// Ruta de registro
 app.post("/registro", async (req, res) => {
   try {
     const { nombre, telefono, contraseña, confirmarContraseña } = req.body;
@@ -133,7 +149,7 @@ app.post("/registro", async (req, res) => {
   }
 });
 
-// Ruta de verificación corregida
+// Ruta de verificación
 app.post("/verificar-codigo", async (req, res) => {
   try {
     const { telefono, codigo } = req.body;
@@ -189,6 +205,7 @@ app.post("/verificar-codigo", async (req, res) => {
   }
 });
 
+// Ruta de login
 app.post("/login", async (req, res) => {
   try {
     const { telefono, contraseña } = req.body;
@@ -266,19 +283,11 @@ app.post("/login", async (req, res) => {
 });
 
 // Ruta para verificar token
-app.get("/verify-token", async (req, res) => {
+app.get("/verify-token", authenticate, async (req, res) => {
   try {
-    const authHeader = req.headers['authorization'];
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: "Token no proporcionado" });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, SECRET_KEY);
-
     const [users] = await db.query(
       "SELECT id, nombre, telefono, tipo_usuario FROM usuarios WHERE id = ?",
-      [decoded.id]
+      [req.user.id]
     );
 
     if (users.length === 0) {
@@ -292,37 +301,191 @@ app.get("/verify-token", async (req, res) => {
 
   } catch (error) {
     console.error("Error en verify-token:", error);
-    if (error.name === "JsonWebTokenError") {
-      return res.status(401).json({ error: "Token inválido" });
-    }
-    if (error.name === "TokenExpiredError") {
-      return res.status(401).json({ error: "Token expirado" });
-    }
     res.status(500).json({ error: "Error interno del servidor" });
   }
 });
-// Obtener todas las categorías
-app.get('/categorias', async (req, res) => {
+
+
+app.get("/usuarios", (req, res) => {
+  db.execute("SELECT * FROM usuarios")
+    .then(([rows, fields]) => {
+      res.json(rows); // Devolver los resultados como JSON
+    })
+    .catch((err) => {
+      console.error("❌ Error al obtener usuarios:", err.message);
+      res.status(500).send("Error al obtener usuarios");
+    });
+});
+// POST: Crear nuevo usuario
+// Ruta para agregar un nuevo usuario
+app.post("/usuarios", express.json(), (req, res) => {
+  const { nombre, contraseña, telefono, tipo_usuario } = req.body;
+  
+  // Verificar que se reciban todos los campos
+  if (!nombre || !contraseña || !telefono || !tipo_usuario) {
+    return res.status(400).send("Faltan datos requeridos");
+  }
+
+  const query = "INSERT INTO usuarios (nombre, contraseña, telefono, tipo_usuario) VALUES (?, ?, ?, ?)";
+  
+  db.execute(query, [nombre, contraseña, telefono, tipo_usuario])
+    .then(([result]) => {
+      res.status(201).send(`Usuario creado con ID: ${result.insertId}`);
+    })
+    .catch((err) => {
+      console.error("❌ Error al agregar usuario:", err.message);
+      res.status(500).send("Error al agregar usuario");
+    });
+});
+app.post('/api/pedidos', async (req, res) => {
   try {
-    const [categorias] = await db.query('SELECT * FROM categoria');
-    res.json(categorias);
+    const { carrito, total, metodo_pago, comprobanteBase64, comprobanteMime } = req.body;
+
+    if (!carrito || !total || !metodo_pago) {
+      return res.status(400).json({ message: 'Datos incompletos' });
+    }
+
+    let comprobanteBuffer = null;
+    if (comprobanteBase64) {
+      comprobanteBuffer = Buffer.from(comprobanteBase64, 'base64');
+    }
+    const [result] = await db.query(
+      'INSERT INTO pedidos (metodo_pago, total, comprobante, comprobante_mime) VALUES (?, ?, ?, ?)',
+      [metodo_pago, total, comprobanteBuffer, comprobanteMime || null]
+    );
+
+    const pedidoId = result.insertId;
+
+    // Insertar detalle
+    const detalleValues = carrito.map(item => [pedidoId, item.id, item.cantidad || 1]);
+    await db.query(
+      'INSERT INTO pedido_detalle (pedido_id, producto_id, cantidad) VALUES ?',
+      [detalleValues]
+    );
+
+    res.status(201).json({ message: 'Pedido creado', pedidoId });
   } catch (error) {
-    console.error('Error al obtener categorías:', error);
-    res.status(500).json({ error: 'Error al obtener categorías' });
+    console.error(error);
+    res.status(500).json({ message: 'Error al crear pedido' });
   }
 });
-app.get('/categorias/:id', async (req, res) => {
+
+app.get('/api/pedidos', async (req, res) => {
   try {
-    const [categoria] = await pool.query('SELECT * FROM categoria WHERE id = ?', [req.params.id]);
-    
-    if (categoria.length === 0) {
-      return res.status(404).json({ error: 'Categoría no encontrada' });
-    }
-    
-    res.json(categoria[0]);
+    const [pedidos] = await db.query('SELECT id, metodo_pago, total, fecha FROM pedidos ORDER BY fecha DESC');
+    res.json(pedidos);
   } catch (error) {
-    console.error('Error al obtener categoría:', error);
-    res.status(500).json({ error: 'Error al obtener categoría' });
+    res.status(500).json({ message: 'Error al obtener pedidos' });
+  }
+});
+app.get('/api/pedidos/:id', async (req, res) => {
+  const pedidoId = req.params.id;
+  try {
+    const [[pedido]] = await db.query('SELECT id, metodo_pago, total, fecha FROM pedidos WHERE id = ?', [pedidoId]);
+    if (!pedido) return res.status(404).json({ message: 'Pedido no encontrado' });
+
+    const [detalle] = await db.query(
+      `SELECT producto_id, cantidad FROM pedido_detalle WHERE pedido_id = ?`,
+      [pedidoId]
+    );
+
+    res.json({ pedido, detalle });
+  } catch (error) {
+    res.status(500).json({ message: 'Error al obtener pedido' });
+  }
+});
+app.get('/api/pedidos/:id/comprobante', async (req, res) => {
+  const pedidoId = req.params.id;
+  try {
+    const [rows] = await db.query(
+      'SELECT comprobante, comprobante_mime FROM pedidos WHERE id = ?',
+      [pedidoId]
+    );
+
+    if (rows.length === 0 || !rows[0].comprobante) {
+      return res.status(404).send('No se encontró comprobante');
+    }
+
+    res.setHeader('Content-Type', rows[0].comprobante_mime || 'image/jpeg');
+    res.send(rows[0].comprobante);
+  } catch (error) {
+    res.status(500).send('Error al obtener imagen');
+  }
+});
+
+
+// PUT: Actualizar un usuario por ID
+app.put('/usuarios/:id', async (req, res) => {
+  const { nombre, contraseña, telefono, tipo_usuario } = req.body;
+  const { id } = req.params;
+
+  try {
+    let query = '';
+    let params = [];
+
+    if (contraseña && contraseña.trim() !== '') {
+      // Si se proporciona nueva contraseña, la hasheamos
+      const hashedPassword = await bcrypt.hash(contraseña, 10);
+      query = `
+        UPDATE usuarios 
+        SET nombre = ?, contraseña = ?, telefono = ?, tipo_usuario = ? 
+        WHERE id = ?`;
+      params = [nombre, hashedPassword, telefono, tipo_usuario, id];
+    } else {
+      // Si no se proporciona contraseña, no la actualizamos
+      query = `
+        UPDATE usuarios 
+        SET nombre = ?, telefono = ?, tipo_usuario = ? 
+        WHERE id = ?`;
+      params = [nombre, telefono, tipo_usuario, id];
+    }
+
+    db.query(query, params, (err, result) => {
+      if (err) return res.status(500).send(err);
+      res.json({ message: 'Usuario actualizado correctamente' });
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al actualizar usuario' });
+  }
+});
+
+
+app.delete("/usuarios/:id", async (req, res) => {
+  const id = req.params.id;
+  try {
+    const [result] = await pool.query("DELETE FROM usuarios WHERE id = ?", [id]);
+    res.json({ affectedRows: result.affectedRows });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Error al eliminar usuario" });
+  }
+});
+
+
+app.get("/categorias", async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT id, nombre, imagen
+      FROM categoria
+    `);
+
+    const categoriasConImagen = rows.map((categoria) => {
+      let imagenBase64 = null;
+      if (categoria.imagen && categoria.imagen instanceof Buffer) {
+        imagenBase64 = categoria.imagen.toString('base64');
+      }
+
+      return {
+        ...categoria,
+        imagen: imagenBase64, // Imagen convertida a base64
+      };
+    });
+
+    res.json(categoriasConImagen);
+  } catch (error) {
+    console.error("Error al obtener categorías:", error);
+    res.status(500).json({ error: "Error al obtener categorías" });
   }
 });
 
@@ -330,233 +493,96 @@ app.get('/categorias/:id', async (req, res) => {
 // Obtener platillos por categoría
 app.get('/categorias/:id/platillos', async (req, res) => {
   try {
+    console.log(`[API] Fetching platillos for categoria ID: ${req.params.id}`);
+    
+    // 1. Obtener platillos de la base de datos
     const [platillos] = await db.query(`
-      SELECT p.*, c.nombre AS categoria_nombre 
+      SELECT 
+        p.id,
+        p.nombre,
+        p.descripcion,
+        p.precio,
+        p.categoria_id,
+        p.imagen,
+        c.nombre AS categoria_nombre 
       FROM platillo p
       JOIN categoria c ON p.categoria_id = c.id
       WHERE p.categoria_id = ?
     `, [req.params.id]);
-    
-    // Formatear la respuesta
-    const platillosFormateados = platillos.map(platillo => ({
-      id: platillo.id,
-      nombre: platillo.nombre,
-      descripcion: platillo.descripcion,
-      precio: platillo.precio,
-      imagen: platillo.imagen ? `${process.env.BASE_URL}/images/${platillo.imagen}` : null,
-      categoria: {
-        id: platillo.categoria_id,
-        nombre: platillo.categoria_nombre
+
+    // 2. Procesar las imágenes correctamente
+    const platillosFormateados = platillos.map(platillo => {
+      // Verificar si la imagen es un Buffer válido
+      let imagenBase64 = null;
+      if (platillo.imagen && Buffer.isBuffer(platillo.imagen)) {
+        try {
+          imagenBase64 = platillo.imagen.toString('base64');
+        } catch (error) {
+          console.error('Error converting image to base64:', error);
+        }
       }
-    }));
-    
-    res.json(platillosFormateados);
-  } catch (error) {
-    console.error('Error al obtener platillos por categoría:', error);
-    res.status(500).json({ 
-      error: 'Error al obtener platillos por categoría',
-      detalle: error.message 
-    });
-  }
-});
 
-//Carrusel 
-app.get('/api/platillos-destacados', async (req, res) => {
-  let connection;
-  try {
-    // 1. Obtener conexión de la pool
-    connection = await db.getConnection();
-    
-    // 2. Consulta optimizada para obtener platillos con calificaciones
-    const query = `
-      SELECT 
-        p.id,
-        p.nombre,
-        p.imagen,
-        p.descripcion,
-        c.nombre AS categoria,
-        IFNULL(ROUND(AVG(cp.calificacion), 1), 0) AS calificacion_promedio,
-        COUNT(cp.id) AS total_calificaciones,
-        GROUP_CONCAT(DISTINCT cp.comentario SEPARATOR '|||') AS comentarios
-      FROM 
-        platillo p
-      JOIN 
-        categoria c ON p.categoria_id = c.id
-      LEFT JOIN 
-        calificaciones_platillos cp ON p.id = cp.platillo_id
-      WHERE
-        p.id IN (
-          SELECT platillo_id 
-          FROM calificaciones_platillos 
-          GROUP BY platillo_id 
-          ORDER BY AVG(calificacion) DESC 
-          LIMIT 10
-        )
-        OR p.id IN (
-          SELECT id 
-          FROM platillo 
-          ORDER BY RAND() 
-          LIMIT 10
-        )
-      GROUP BY 
-        p.id
-      ORDER BY 
-        calificacion_promedio DESC,
-        total_calificaciones DESC
-      LIMIT 10
-    `;
-
-    const [rows] = await connection.query(query);
-
-    // 3. Procesar resultados
-    const platillos = rows.map(platillo => {
-      // Procesar comentarios para eliminar duplicados
-      const comentariosUnicos = [...new Set(
-        (platillo.comentarios || '').split('|||').filter(c => c && c.trim() !== '')
-      )];
-      
       return {
-        id: platillo.id.toString(),
+        id: platillo.id,
         nombre: platillo.nombre,
-        imagen: platillo.imagen || 'default.jpg',
-        descripcion: platillo.descripcion || '',
-        categoria: platillo.categoria,
-        calificacion: Number(platillo.calificacion_promedio),
-        total_calificaciones: Number(platillo.total_calificaciones),
-        comentarios: comentariosUnicos.slice(0, 3) // Mostrar máximo 3 comentarios
+        descripcion: platillo.descripcion,
+        precio: platillo.precio,
+        imagen: imagenBase64, // Puede ser null si no hay imagen válida
+        categoria: {
+          id: platillo.categoria_id,
+          nombre: platillo.categoria_nombre
+        }
       };
     });
 
-    // 4. Si no hay resultados, devolver platillos aleatorios
-    if (platillos.length === 0) {
-      const [platillosAleatorios] = await connection.query(`
-        SELECT 
-          p.id,
-          p.nombre,
-          p.imagen,
-          p.descripcion,
-          cat.nombre AS categoria
-        FROM 
-          platillo p
-        JOIN 
-          categoria cat ON p.categoria_id = cat.id
-        ORDER BY RAND()
-        LIMIT 10
-      `);
-      
-      const resultado = platillosAleatorios.map(p => ({
-        id: p.id.toString(),
-        nombre: p.nombre,
-        imagen: p.imagen || 'default.jpg',
-        descripcion: p.descripcion || '',
-        categoria: p.categoria,
-        calificacion: 0,
-        total_calificaciones: 0,
-        comentarios: []
-      }));
-      
-      return res.json({
-        success: true,
-        data: resultado,
-        message: 'Platillos aleatorios (no hay calificaciones aún)'
-      });
-    }
-
-    res.json({
-      success: true,
-      data: platillos,
-      message: 'Platillos destacados obtenidos exitosamente'
+    console.log('[API] First platillo sample:', {
+      ...platillosFormateados[0],
+      imagen: platillosFormateados[0]?.imagen ? '[BASE64_DATA]' : null
     });
 
+    res.json(platillosFormateados);
   } catch (error) {
-    console.error('Error en /api/platillos-destacados:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al obtener platillos destacados',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    console.error('[API] Error:', error);
+    res.status(500).json({ 
+      error: 'Error al obtener platillos',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
-  } finally {
-    // 5. Liberar conexión siempre
-    if (connection) {
-      try {
-        await connection.release();
-      } catch (releaseError) {
-        console.error('Error liberando conexión:', releaseError);
+  }
+});
+
+// Obtener todos los platillos
+app.get("/platillos", async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT p.id, p.nombre, p.descripcion, p.precio, p.imagen, 
+             p.categoria_id, c.nombre AS categoria
+      FROM platillo p
+      JOIN categoria c ON p.categoria_id = c.id
+    `);
+
+    const platillosConImagen = rows.map((platillo) => {
+      let imagenBase64 = null;
+
+      // Convertimos el buffer a base64, si existe
+      if (platillo.imagen) {
+        imagenBase64 = Buffer.from(platillo.imagen).toString("base64");
       }
-    }
-  }
-});
-// Endpoint para obtener calificaciones
-app.get('/platillos/:id/calificaciones', async (req, res) => {
-  try {
-    const platilloId = req.params.id;
 
-    const [calificaciones] = await db.query(`
-      SELECT 
-        cp.*,
-        u.nombre as usuario_nombre,
-        DATE_FORMAT(cp.fecha_calificacion, '%Y-%m-%d %H:%i') as fecha_formateada
-      FROM calificaciones_platillos cp
-      JOIN usuarios u ON cp.usuario_id = u.id
-      WHERE cp.platillo_id = ?
-      ORDER BY cp.fecha_calificacion DESC
-    `, [platilloId]);
-
-    const [stats] = await db.query(`
-      SELECT 
-        AVG(calificacion) as promedio,
-        COUNT(*) as total
-      FROM calificaciones_platillos
-      WHERE platillo_id = ?
-    `, [platilloId]);
-
-    res.json({
-      calificaciones,
-      promedio: parseFloat(stats[0].promedio || 0).toFixed(1),
-      total: stats[0].total
+      return {
+        ...platillo,
+        imagen: imagenBase64,
+      };
     });
 
+    res.json(platillosConImagen);
   } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ error: 'Error al obtener calificaciones' });
-  }
-});
-
-// Endpoint para borrar calificación
-app.delete('/calificaciones/:id', async (req, res) => {
-  try {
-    const calificacionId = req.params.id;
-    const usuarioId = req.body.usuario_id; // Requiere autenticación
-
-    // Verificar que la calificación pertenece al usuario
-    const [calificacion] = await pool.query(`
-      SELECT id FROM calificaciones_platillos 
-      WHERE id = ? AND usuario_id = ?
-    `, [calificacionId, usuarioId]);
-
-    if (calificacion.length === 0) {
-      return res.status(403).json({ error: 'No autorizado' });
-    }
-
-    const [result] = await pool.query(`
-      DELETE FROM calificaciones_platillos 
-      WHERE id = ?
-    `, [calificacionId]);
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Calificación no encontrada' });
-    }
-
-    res.json({ success: true });
-
-  } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ error: 'Error al borrar calificación' });
+    console.error("Error al obtener platillos:", error);
+    res.status(500).json({ error: "Error al obtener platillos" });
   }
 });
 
 
-
+// Endpoint para obtener calificaciones de un platillo
 app.get('/platillos/:id/calificaciones', async (req, res) => {
   try {
     const platilloId = req.params.id;
@@ -572,7 +598,7 @@ app.get('/platillos/:id/calificaciones', async (req, res) => {
     }
 
     // Obtener calificaciones con información del usuario
-    const [calificaciones] = await pool.query(`
+    const [calificaciones] = await db.query(`
       SELECT 
         cp.id,
         cp.usuario_id,
@@ -614,27 +640,20 @@ app.get('/platillos/:id/calificaciones', async (req, res) => {
     });
   }
 });
-// 4. Agregar nueva calificación
-// En tu servidor backend (app.js o server.js)
-// Endpoint para crear calificaciones (versión mejorada)
-app.post('/platillos/:id/calificaciones', async (req, res) => {
+
+// Endpoint para agregar/actualizar calificación
+app.post('/platillos/:id/calificaciones', authenticate, async (req, res) => {
   const platilloId = req.params.id;
-  const { usuario_id, calificacion, comentario } = req.body;
+  const { calificacion, comentario } = req.body;
+  const usuario_id = req.user.id;
+
   console.log('Datos recibidos:', { usuario_id, calificacion, platilloId, comentario });
 
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) {
-    return res.status(401).json({ 
-      success: false,
-      error: 'Token no proporcionado' 
-    });
-  }
-
   // Validación de campos requeridos
-  if (!usuario_id || calificacion === undefined || !platilloId) {
+  if (calificacion === undefined || !platilloId) {
     return res.status(400).json({ 
       success: false,
-      error: 'Usuario ID, calificación y platillo ID son requeridos' 
+      error: 'Calificación y platillo ID son requeridos' 
     });
   }
 
@@ -664,20 +683,7 @@ app.post('/platillos/:id/calificaciones', async (req, res) => {
       });
     }
 
-    // 2. Verificar existencia del usuario
-    const [usuario] = await connection.query(
-      'SELECT id FROM usuarios WHERE id = ?', 
-      [usuario_id]
-    );
-    
-    if (usuario.length === 0) {
-      return res.status(404).json({ 
-        success: false,
-        error: 'Usuario no encontrado' 
-      });
-    }
-
-    // 3. Verificar si ya existe una calificación del usuario para este platillo
+    // 2. Verificar si ya existe una calificación del usuario para este platillo
     const [existente] = await connection.query(
       'SELECT * FROM calificaciones_platillos WHERE usuario_id = ? AND platillo_id = ?',
       [usuario_id, platilloId]
@@ -697,7 +703,7 @@ app.post('/platillos/:id/calificaciones', async (req, res) => {
       );
     }
 
-    // 4. Obtener los datos actualizados para la respuesta
+    // 3. Obtener los datos actualizados para la respuesta
     const [calificacionActualizada] = await connection.query(
       `SELECT 
         cp.*, 
@@ -754,67 +760,121 @@ app.post('/platillos/:id/calificaciones', async (req, res) => {
     if (connection) connection.release();
   }
 });
-// 5. Eliminar calificación
-app.delete('/platillos/:platilloId/calificaciones/:usuarioId', async (req, res) => {
-  const { platilloId, usuarioId } = req.params;
-  const token = req.headers.authorization?.split(' ')[1];
 
-  if (!token) {
-    return res.status(401).json({
-      success: false,
-      error: 'Token no proporcionado'
-    });
-  }
-
-  let connection;
+// Endpoint para borrar calificación
+app.delete('/calificaciones/:id', authenticate, async (req, res) => {
   try {
-    connection = await db.getConnection();
+    const calificacionId = req.params.id;
+    const usuarioId = req.user.id;
 
-    // 1. Verificar existencia de la calificación
-    const [calificacion] = await connection.query(
-      'SELECT * FROM calificaciones_platillos WHERE platillo_id = ? AND usuario_id = ?',
-      [platilloId, usuarioId]
-    );
+    // Verificar que la calificación pertenece al usuario
+    const [calificacion] = await db.query(`
+      SELECT id FROM calificaciones_platillos 
+      WHERE id = ? AND usuario_id = ?
+    `, [calificacionId, usuarioId]);
 
     if (calificacion.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'Calificación no encontrada'
-      });
+      return res.status(403).json({ error: 'No autorizado' });
     }
 
-    // 2. Eliminar la calificación
-    await connection.query(
-      'DELETE FROM calificaciones_platillos WHERE platillo_id = ? AND usuario_id = ?',
-      [platilloId, usuarioId]
-    );
+    const [result] = await db.query(`
+      DELETE FROM calificaciones_platillos 
+      WHERE id = ?
+    `, [calificacionId]);
 
-    // 3. Recalcular promedio del platillo
-    const [resultado] = await connection.query(
-      'SELECT AVG(calificacion) as nuevo_promedio, COUNT(*) as total FROM calificaciones_platillos WHERE platillo_id = ?',
-      [platilloId]
-    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Calificación no encontrada' });
+    }
 
-    return res.status(200).json({
-      success: true,
-      data: {
-        nuevo_promedio: resultado[0].nuevo_promedio || 0,
-        total_calificaciones: resultado[0].total
-      },
-      message: 'Calificación eliminada exitosamente'
-    });
+    res.json({ success: true });
 
   } catch (error) {
-    console.error('Error en el servidor:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Error interno del servidor',
-      ...(process.env.NODE_ENV === 'development' && { details: error.message })
-    });
-  } finally {
-    if (connection) connection.release();
+    console.error('Error:', error);
+    res.status(500).json({ error: 'Error al borrar calificación' });
   }
 });
+
+app.get("/platillos/mejores", async (req, res) => {
+  try {
+    // Verificar si hay calificaciones registradas
+    const [hasRatings] = await db.query(
+      "SELECT COUNT(*) as count FROM calificaciones_platillos"
+    );
+
+    if (hasRatings[0].count === 0) {
+      // Si no hay calificaciones, retornar 5 platillos aleatorios
+      const [randomDishes] = await db.query(`
+        SELECT 
+          p.id,
+          p.nombre,
+          p.descripcion,
+          p.precio,
+          p.imagen,
+          0 AS promedio_calificacion,
+          0 AS numero_calificaciones
+        FROM platillo p
+        ORDER BY RAND()
+        LIMIT 5
+      `);
+
+      const platillosConImagen = randomDishes.map((platillo) => ({
+        id: platillo.id,
+        nombre: platillo.nombre,
+        descripcion: platillo.descripcion,
+        precio: platillo.precio,
+        promedio_calificacion: 0,
+        numero_calificaciones: 0,
+        imagen:
+          platillo.imagen && Buffer.isBuffer(platillo.imagen)
+            ? `data:image/jpeg;base64,${platillo.imagen.toString("base64")}`
+            : null,
+        mensaje: "No hay suficientes calificaciones, mostrando platillos aleatorios",
+      }));
+
+      return res.json(platillosConImagen);
+    }
+
+    // Si hay calificaciones, obtener los mejores platillos
+    const [rows] = await db.query(`
+      SELECT 
+        p.id,
+        p.nombre,
+        p.descripcion,
+        p.precio,
+        p.imagen,
+        ROUND(AVG(cp.calificacion), 2) AS promedio_calificacion,
+        COUNT(cp.id) AS numero_calificaciones
+      FROM platillo p
+      JOIN calificaciones_platillos cp ON p.id = cp.platillo_id
+      GROUP BY p.id
+      HAVING numero_calificaciones > 0
+      ORDER BY promedio_calificacion DESC, numero_calificaciones DESC
+      LIMIT 5
+    `);
+
+    const platillosConImagen = rows.map((platillo) => ({
+      id: platillo.id,
+      nombre: platillo.nombre,
+      descripcion: platillo.descripcion,
+      precio: platillo.precio,
+      promedio_calificacion: platillo.promedio_calificacion,
+      numero_calificaciones: platillo.numero_calificaciones,
+      imagen:
+        platillo.imagen && Buffer.isBuffer(platillo.imagen)
+          ? `data:image/jpeg;base64,${platillo.imagen.toString("base64")}`
+          : null,
+    }));
+
+    return res.json(platillosConImagen);
+  } catch (error) {
+    console.error("Error al obtener los platillos mejor calificados:", error);
+    return res.status(500).json({
+      error: "Error al obtener los platillos mejor calificados",
+      detalle: error.message,
+    });
+  }
+});
+
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
@@ -828,27 +888,6 @@ app.listen(PORT, '0.0.0.0', () => {
       }
     });
   });
-
-// Endpoint para obtener platillos por categoría
-app.get('/platillos', async (req, res) => {
-  const { categoria_id } = req.query;
-  
-  try {
-    let query = 'SELECT * FROM platillo';
-    const params = [];
-    
-    if (categoria_id) {
-      query += ' WHERE categoria_id = ?';
-      params.push(categoria_id);
-    }
-    
-    const [results] = await connection.execute(query, params);
-    res.json(results);
-  } catch (error) {
-    console.error('Error al obtener platillos:', error);
-    res.status(500).json({ error: 'Error al obtener platillos' });
-  }
-});
 
   console.log(`
   🚀 Servidor funcionando en:
