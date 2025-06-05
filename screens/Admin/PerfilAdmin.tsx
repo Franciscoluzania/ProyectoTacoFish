@@ -31,12 +31,14 @@ const PerfilAdmin: React.FC<PerfilAdminProps> = ({ setIsLoggedIn }) => {
   const [modalLogout, setModalLogout] = useState(false);
   const [modalEditarUsuario, setModalEditarUsuario] = useState(false);
   const [usuarioEditando, setUsuarioEditando] = useState<Usuario | null>(null);
+
   const [totalUsuarios, setTotalUsuarios] = useState(0);
   const [totalPlatillos, setTotalPlatillos] = useState(0);
+  const [totalPedidos, setTotalPedidos] = useState(0); // <-- contador pedidos agregado
 
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { logout } = useAuth();
-  const apiUrl = "http://192.168.56.1:3000";
+  const apiUrl = "http://192.168.8.102:3000";
 
   const handleLogout = async () => {
     try {
@@ -54,13 +56,16 @@ const PerfilAdmin: React.FC<PerfilAdminProps> = ({ setIsLoggedIn }) => {
 
   const fetchConteos = useCallback(async () => {
     try {
-      const [usuariosResponse, platillosResponse] = await Promise.all([
+      const [usuariosResponse, platillosResponse, pedidosResponse] = await Promise.all([
         axios.get<Usuario[]>(`${apiUrl}/usuarios`),
         axios.get(`${apiUrl}/platillos`),
+        axios.get(`${apiUrl}/api/pedidos`), // <-- fetch pedidos agregado
       ]);
 
       setTotalUsuarios(usuariosResponse.data.length);
       setTotalPlatillos(platillosResponse.data.length);
+      setTotalPedidos(Array.isArray(pedidosResponse.data) ? pedidosResponse.data.length : 0); // <-- guardo cantidad pedidos
+
     } catch (error) {
       console.error("Error al cargar conteos:", error);
       Alert.alert("Error", "No se pudieron cargar los conteos.");
@@ -89,7 +94,7 @@ const PerfilAdmin: React.FC<PerfilAdminProps> = ({ setIsLoggedIn }) => {
         <AdminCard
           icon="receipt"
           title="Pedidos"
-          count={0}
+          count={totalPedidos}  
           onPress={() => setModalPedidos(true)}
         />
 

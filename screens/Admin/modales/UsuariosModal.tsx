@@ -31,7 +31,7 @@ interface UsuariosModalProps {
 const UsuariosModal: React.FC<UsuariosModalProps> = ({
   visible,
   onClose,
-  apiUrl = "http://192.168.56.1:3000",
+  apiUrl = "http://192.168.8.102:3000",
 }) => {
   const [searchText, setSearchText] = useState("");
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);

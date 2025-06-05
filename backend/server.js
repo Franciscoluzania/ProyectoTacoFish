@@ -22,9 +22,8 @@ app.use(cors({
   credentials: true,
 }),);
 app.use('/uploads', express.static('C:/ProgramData/MySQL/MySQL Server 8.0/Uploads'));
-app.use(express.json());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ limit: '20mb', extended: true }));
 // Configuración de la base de datos MySQL
 const db = mysql.createPool({
   host: process.env.DB_HOST,
@@ -337,80 +336,249 @@ app.post("/usuarios", express.json(), (req, res) => {
       res.status(500).send("Error al agregar usuario");
     });
 });
+// Crear un nuevo pedido
 app.post('/api/pedidos', async (req, res) => {
   try {
-    const { carrito, total, metodo_pago, comprobanteBase64, comprobanteMime } = req.body;
+    console.log("📥 Body recibido:", req.body);
 
-    if (!carrito || !total || !metodo_pago) {
-      return res.status(400).json({ message: 'Datos incompletos' });
+    const {
+      carrito,
+      total,
+      metodo_pago,
+      comprobanteBase64,
+      comprobanteMime,
+      user_id,         // user_id desde frontend
+      cliente_anonimo  // identificador string si no hay user logueado
+    } = req.body;
+
+    // Validación básica
+    if (!carrito || !Array.isArray(carrito) || carrito.length === 0) {
+      console.warn("❌ Carrito vacío o inválido");
+      return res.status(400).json({ message: 'Carrito vacío o inválido' });
+    }
+    if (!total || !metodo_pago) {
+      console.warn("❌ Falta total o método de pago");
+      return res.status(400).json({ message: 'Falta total o método de pago' });
+    }
+    if (!user_id && !cliente_anonimo) {
+      console.warn("❌ Falta user_id o cliente_anonimo");
+      return res.status(400).json({ message: 'Falta user_id o cliente_anonimo' });
     }
 
+    // Procesar imagen comprobante (opcional)
     let comprobanteBuffer = null;
     if (comprobanteBase64) {
       comprobanteBuffer = Buffer.from(comprobanteBase64, 'base64');
+      console.log("📷 Comprobante convertido a buffer. Tamaño:", comprobanteBuffer.length);
+    } else {
+      console.log("📷 Sin comprobante recibido.");
     }
+
+    // Insertar pedido
     const [result] = await db.query(
-      'INSERT INTO pedidos (metodo_pago, total, comprobante, comprobante_mime) VALUES (?, ?, ?, ?)',
-      [metodo_pago, total, comprobanteBuffer, comprobanteMime || null]
+      `INSERT INTO pedidos (usuario_id, cliente_anonimo, metodo_pago, total, comprobante, comprobante_mime)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [user_id || null, cliente_anonimo || null, metodo_pago, total, comprobanteBuffer, comprobanteMime || null]
     );
-
     const pedidoId = result.insertId;
+    console.log("✅ Pedido insertado con ID:", pedidoId);
 
-    // Insertar detalle
+    // Insertar detalles del pedido
     const detalleValues = carrito.map(item => [pedidoId, item.id, item.cantidad || 1]);
-    await db.query(
-      'INSERT INTO pedido_detalle (pedido_id, producto_id, cantidad) VALUES ?',
-      [detalleValues]
-    );
+    if (detalleValues.length > 0) {
+      await db.query(
+        `INSERT INTO pedido_detalle (pedido_id, platillo_id, cantidad) VALUES ?`,
+        [detalleValues]
+      );
+      console.log("✅ Detalles del pedido insertados.");
+    } else {
+      console.warn("⚠️ No se insertaron detalles porque el carrito está vacío");
+    }
 
-    res.status(201).json({ message: 'Pedido creado', pedidoId });
+    // Obtener info usuario si user_id existe y no es anónimo
+    let usuario = null;
+    if (user_id) {
+      const [usuarioRows] = await db.query(
+        `SELECT id, nombre FROM usuarios WHERE id = ? AND es_anonimo = 0`,
+        [user_id]
+      );
+      if (usuarioRows.length > 0) {
+        usuario = usuarioRows[0];
+      }
+    }
+
+    return res.status(201).json({
+      message: "Pedido registrado con éxito",
+      pedido_id: pedidoId,
+      usuario: usuario || { anonimo: true, identificador: cliente_anonimo }
+    });
+
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Error al crear pedido' });
+    console.error("❌ Error al procesar el pedido:", error);
+    return res.status(500).json({ message: "Error del servidor" });
   }
 });
-
 app.get('/api/pedidos', async (req, res) => {
   try {
-    const [pedidos] = await db.query('SELECT id, metodo_pago, total, fecha FROM pedidos ORDER BY fecha DESC');
-    res.json(pedidos);
+    // Traer todos los pedidos con usuario y detalles
+    const [pedidosRows] = await db.query(`
+      SELECT p.id, p.usuario_id, p.cliente_anonimo, p.metodo_pago, p.total, p.comprobante, p.comprobante_mime,
+             u.nombre AS usuario_nombre
+      FROM pedidos p
+      LEFT JOIN usuarios u ON p.usuario_id = u.id
+      ORDER BY p.id DESC
+    `);
+
+    // Para cada pedido traer los detalles
+    const pedidosConDetalles = await Promise.all(pedidosRows.map(async pedido => {
+      // Obtener detalles del pedido
+      const [detalles] = await db.query(`
+        SELECT platillo_id, cantidad FROM pedido_detalle WHERE pedido_id = ?
+      `, [pedido.id]);
+
+      // Convertir comprobante BLOB a base64 para enviar como string
+      let comprobanteBase64 = null;
+      if (pedido.comprobante) {
+        comprobanteBase64 = Buffer.from(pedido.comprobante).toString('base64');
+      }
+
+      return {
+        id: pedido.id,
+        usuario: pedido.usuario_id ? { id: pedido.usuario_id, nombre: pedido.usuario_nombre } : { anonimo: true, identificador: pedido.cliente_anonimo },
+        metodo_pago: pedido.metodo_pago,
+        total: pedido.total,
+        comprobante: comprobanteBase64 ? `data:${pedido.comprobante_mime};base64,${comprobanteBase64}` : null,
+        detalles: detalles.map(d => ({ platillo_id: d.platillo_id, cantidad: d.cantidad })),
+      };
+    }));
+
+    res.json(pedidosConDetalles);
+
   } catch (error) {
-    res.status(500).json({ message: 'Error al obtener pedidos' });
+    console.error('❌ Error al obtener pedidos:', error);
+    res.status(500).json({ message: 'Error del servidor' });
   }
 });
+
+
+
+// Obtener un pedido por ID
 app.get('/api/pedidos/:id', async (req, res) => {
   const pedidoId = req.params.id;
   try {
-    const [[pedido]] = await db.query('SELECT id, metodo_pago, total, fecha FROM pedidos WHERE id = ?', [pedidoId]);
-    if (!pedido) return res.status(404).json({ message: 'Pedido no encontrado' });
+    console.log("Buscando pedido ID:", pedidoId);
 
-    const [detalle] = await db.query(
-      `SELECT producto_id, cantidad FROM pedido_detalle WHERE pedido_id = ?`,
+    const [[pedido]] = await db.query(
+      `SELECT id, metodo_pago, total, estado, fecha 
+       FROM pedidos 
+       WHERE id = ?`,
       [pedidoId]
     );
 
+    if (!pedido) {
+      console.log("Pedido no encontrado:", pedidoId);
+      return res.status(404).json({ message: 'Pedido no encontrado' });
+    }
+    console.log("Pedido encontrado:", pedido);
+
+    const [detalle] = await db.query(
+      `SELECT platillo_id, cantidad 
+       FROM pedido_detalle 
+       WHERE pedido_id = ?`,
+      [pedidoId]
+    );
+
+    console.log("Detalle obtenido:", detalle.length);
     res.json({ pedido, detalle });
   } catch (error) {
+    console.error("Error en GET /api/pedidos/:id:", error);
     res.status(500).json({ message: 'Error al obtener pedido' });
   }
 });
+
+// Obtener el comprobante de un pedido
 app.get('/api/pedidos/:id/comprobante', async (req, res) => {
   const pedidoId = req.params.id;
   try {
+    console.log("Solicitando comprobante para pedido ID:", pedidoId);
+
     const [rows] = await db.query(
-      'SELECT comprobante, comprobante_mime FROM pedidos WHERE id = ?',
+      `SELECT comprobante, comprobante_mime 
+       FROM pedidos 
+       WHERE id = ?`,
       [pedidoId]
     );
 
     if (rows.length === 0 || !rows[0].comprobante) {
+      console.log("No se encontró comprobante para pedido ID:", pedidoId);
       return res.status(404).send('No se encontró comprobante');
     }
 
+    console.log("Enviando comprobante, tipo MIME:", rows[0].comprobante_mime);
     res.setHeader('Content-Type', rows[0].comprobante_mime || 'image/jpeg');
     res.send(rows[0].comprobante);
   } catch (error) {
+    console.error("Error en GET /api/pedidos/:id/comprobante:", error);
     res.status(500).send('Error al obtener imagen');
   }
+});
+
+app.get("/api/pedidos", (req, res) => {
+  const sql = `
+    SELECT 
+      id, 
+      metodo_pago, 
+      total, 
+      fecha, 
+      estado 
+    FROM pedidos 
+    ORDER BY fecha DESC
+  `;
+
+  db.query(sql, (err, results) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({ error: "Error al obtener pedidos" });
+    }
+    res.json(results);
+  });
+});
+app.get("/api/pedidos/:id/comprobante", (req, res) => {
+  const pedidoId = req.params.id;
+  const sql = "SELECT comprobante, comprobante_mime FROM pedidos WHERE id = ?";
+  db.query(sql, [pedidoId], (err, results) => {
+    if (err || results.length === 0) {
+      return res.status(404).send("Comprobante no encontrado");
+    }
+
+    const { comprobante, comprobante_mime } = results[0];
+    res.setHeader("Content-Type", comprobante_mime);
+    res.send(comprobante);
+  });
+});
+
+
+// Actualizar estado de un pedido
+app.patch("/api/pedidos/:id/estado", (req, res) => {
+  const { id } = req.params;
+  const { estado } = req.body;
+  const estadosValidos = ["en_proceso", "realizado", "cancelado"];
+
+  if (!estadosValidos.includes(estado)) {
+    return res.status(400).json({ error: "Estado no válido" });
+  }
+
+  const sql = "UPDATE pedidos SET estado = ? WHERE id = ?";
+  db.query(sql, [estado, id], (err, result) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({ error: "Error al actualizar estado" });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Pedido no encontrado" });
+    }
+    res.json({ message: "Estado actualizado correctamente" });
+  });
 });
 
 

@@ -3,6 +3,7 @@ import axios from "axios";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 type User = {
+  
   id: string;
   nombre: string;
   telefono: string;
@@ -20,11 +21,11 @@ type AuthContextType = {
   loading: boolean;
   error: string | null;
   clearError: () => void;
-  apiUrl?: "http://192.168.56.1:3000"; // Add this line
+  apiUrl?: "http://192.168.8.102:3000"; // Add this line
   // Add this line
 };
 
-const AuthContext = createContext<AuthContextType>({
+export const AuthContext = createContext<AuthContextType>({
   user: null,
   login: async () => ({ user: null }),
   logout: async () => {},
