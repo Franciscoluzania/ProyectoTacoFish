@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { View, ScrollView, StyleSheet, Alert } from "react-native";
-import UsuariosModal from "@/screens/Admin/modales/UsuariosModal";
+import { View, ScrollView, StyleSheet, Alert, Text } from "react-native";
+import UsuariosModal from "./modales/UsuariosModal";
 import PlatillosModal from "@/screens/Admin/modales/PlatillosModal";
 import PedidosModal from "@/screens/Admin/modales/PedidosModal";
 import LogoutModal from "@/screens/Admin/modales/LogoutModal";
-import EditarUsuarioModal from "@/screens/Admin/modales/EditarUsuarios";
 import AdminCard from "@/screens/Admin/modales/AdminCard";
 import LogoutButton from "@/screens/Admin/modales/LogoutButton";
 import { useAuth } from "@/context/AuthContext";
@@ -20,6 +19,7 @@ interface Usuario {
   telefono: string;
   tipo_usuario: "cliente" | "admin";
 }
+
 interface PerfilAdminProps {
   setIsLoggedIn: (isLoggedIn: boolean) => void;
 }
@@ -29,15 +29,13 @@ const PerfilAdmin: React.FC<PerfilAdminProps> = ({ setIsLoggedIn }) => {
   const [modalPlatillos, setModalPlatillos] = useState(false);
   const [modalPedidos, setModalPedidos] = useState(false);
   const [modalLogout, setModalLogout] = useState(false);
-  const [modalEditarUsuario, setModalEditarUsuario] = useState(false);
-  const [usuarioEditando, setUsuarioEditando] = useState<Usuario | null>(null);
 
   const [totalUsuarios, setTotalUsuarios] = useState(0);
   const [totalPlatillos, setTotalPlatillos] = useState(0);
-  const [totalPedidos, setTotalPedidos] = useState(0); // <-- contador pedidos agregado
+  const [totalPedidos, setTotalPedidos] = useState(0);
 
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();  // <-- obtengo user del contexto
   const apiUrl = "http://192.168.8.102:3000";
 
   const handleLogout = async () => {
@@ -56,16 +54,17 @@ const PerfilAdmin: React.FC<PerfilAdminProps> = ({ setIsLoggedIn }) => {
 
   const fetchConteos = useCallback(async () => {
     try {
-      const [usuariosResponse, platillosResponse, pedidosResponse] = await Promise.all([
-        axios.get<Usuario[]>(`${apiUrl}/usuarios`),
+      const [usuariosRes, platillosRes, pedidosRes] = await Promise.all([
+        axios.get<Usuario[]>(`${apiUrl}/api/usuarios`),
         axios.get(`${apiUrl}/platillos`),
-        axios.get(`${apiUrl}/api/pedidos`), // <-- fetch pedidos agregado
+        axios.get(`${apiUrl}/api/pedidos`),
       ]);
 
-      setTotalUsuarios(usuariosResponse.data.length);
-      setTotalPlatillos(platillosResponse.data.length);
-      setTotalPedidos(Array.isArray(pedidosResponse.data) ? pedidosResponse.data.length : 0); // <-- guardo cantidad pedidos
-
+      setTotalUsuarios(usuariosRes.data.length);
+      setTotalPlatillos(platillosRes.data.length);
+      setTotalPedidos(
+        Array.isArray(pedidosRes.data) ? pedidosRes.data.length : 0
+      );
     } catch (error) {
       console.error("Error al cargar conteos:", error);
       Alert.alert("Error", "No se pudieron cargar los conteos.");
@@ -79,6 +78,10 @@ const PerfilAdmin: React.FC<PerfilAdminProps> = ({ setIsLoggedIn }) => {
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContainer}>
+        {user?.nombre ? (
+          <Text style={styles.adminName}>Bienvenido, {user.nombre}</Text>
+        ) : null}
+
         <AdminCard
           icon="users"
           title="Usuarios"
@@ -94,10 +97,9 @@ const PerfilAdmin: React.FC<PerfilAdminProps> = ({ setIsLoggedIn }) => {
         <AdminCard
           icon="receipt"
           title="Pedidos"
-          count={totalPedidos}  
+          count={totalPedidos}
           onPress={() => setModalPedidos(true)}
         />
-
         <LogoutButton onPress={() => setModalLogout(true)} />
       </ScrollView>
 
@@ -105,11 +107,7 @@ const PerfilAdmin: React.FC<PerfilAdminProps> = ({ setIsLoggedIn }) => {
         visible={modalUsuarios}
         onClose={() => {
           setModalUsuarios(false);
-          fetchConteos(); // Actualizar conteo después de cerrar modal
-        }}
-        onEditUser={(user: Usuario) => {
-          setUsuarioEditando(user);
-          setModalEditarUsuario(true);
+          fetchConteos();
         }}
         apiUrl={apiUrl}
       />
@@ -118,7 +116,7 @@ const PerfilAdmin: React.FC<PerfilAdminProps> = ({ setIsLoggedIn }) => {
         visible={modalPlatillos}
         onClose={() => {
           setModalPlatillos(false);
-          fetchConteos(); // Actualizar conteo después de cerrar modal
+          fetchConteos();
         }}
       />
 
@@ -131,17 +129,6 @@ const PerfilAdmin: React.FC<PerfilAdminProps> = ({ setIsLoggedIn }) => {
         visible={modalLogout}
         onClose={() => setModalLogout(false)}
         onLogout={handleLogout}
-      />
-
-      <EditarUsuarioModal
-        visible={modalEditarUsuario}
-        user={usuarioEditando}
-        onClose={() => setModalEditarUsuario(false)}
-        onSave={() => {
-          setModalEditarUsuario(false);
-          fetchConteos(); // Refrescar usuarios si se editó
-        }}
-        apiUrl={apiUrl}
       />
     </View>
   );
@@ -156,6 +143,12 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 40,
     alignItems: "center",
+  },
+  adminName: {
+    fontSize: 22,
+    fontWeight: "bold",
+    marginBottom: 20,
+    color: "#333",
   },
 });
 

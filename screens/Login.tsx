@@ -7,6 +7,8 @@ import {
   StyleSheet,
   ImageBackground,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { useAuth } from "@/context/AuthContext";
 import { NavigationProp } from "@react-navigation/native";
@@ -21,52 +23,57 @@ const Login: React.FC<LoginProps> = ({ navigation }) => {
   const [contraseña, setContraseña] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { user, login, loading: authLoading } = useAuth();
 
-  // Redirección basada en el tipo de usuario
+  const { user, login, loading: authLoading, error: authError, clearError } = useAuth();
+
+  // Redirección después del login exitoso
   useEffect(() => {
     if (user) {
       if (user.tipo_usuario === "admin") {
-        navigation.reset({
-          index: 0,
-          routes: [{ name: "PerfilAdmin" }],
-        });
+        navigation.reset({ index: 0, routes: [{ name: "PerfilAdmin" }] });
       } else {
-        navigation.reset({
-          index: 0,
-          routes: [{ name: "Perfil" }],
-        });
+        navigation.reset({ index: 0, routes: [{ name: "Perfil" }] });
       }
     }
-  }, [user, navigation]);
+  }, [user]);
+
+  useEffect(() => {
+    if (authError) {
+      setError(authError);
+    }
+  }, [authError]);
 
   const formatPhoneNumber = (phone: string) => {
     return phone.replace(/\D/g, "");
   };
 
   const handleLogin = async () => {
-    try {
-      setIsSubmitting(true);
-      setError("");
+    setIsSubmitting(true);
+    setError("");
+    clearError();
 
-      // Validaciones básicas
-      if (!telefono.trim() || !contraseña.trim()) {
-        setError("Por favor, completa todos los campos");
-        return;
-      }
+    const cleanedTelefono = formatPhoneNumber(telefono);
 
-      const formattedTelefono = formatPhoneNumber(telefono);
-      if (formattedTelefono.length !== 10) {
-        setError("El teléfono debe tener 10 dígitos");
-        return;
-      }
-
-      await login(formattedTelefono, contraseña);
-    } catch (error: any) {
-      setError(error.message);
-    } finally {
+    // Validaciones
+    if (!cleanedTelefono || !contraseña.trim()) {
+      setError("Por favor, completa todos los campos");
       setIsSubmitting(false);
+      return;
     }
+
+    if (cleanedTelefono.length !== 10) {
+      setError("El teléfono debe tener 10 dígitos");
+      setIsSubmitting(false);
+      return;
+    }
+
+    const { error: loginError } = await login(cleanedTelefono, contraseña);
+
+    if (loginError) {
+      setError(loginError);
+    }
+
+    setIsSubmitting(false);
   };
 
   if (authLoading) {
@@ -83,7 +90,10 @@ const Login: React.FC<LoginProps> = ({ navigation }) => {
       style={styles.background}
       blurRadius={10}
     >
-      <View style={styles.container}>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
         <View style={styles.card}>
           <Text style={styles.title}>Iniciar Sesión</Text>
 
@@ -104,6 +114,7 @@ const Login: React.FC<LoginProps> = ({ navigation }) => {
             onChangeText={(text) => {
               setTelefono(text);
               setError("");
+              clearError();
             }}
             placeholder="10 dígitos"
             placeholderTextColor="#999"
@@ -118,13 +129,14 @@ const Login: React.FC<LoginProps> = ({ navigation }) => {
             onChangeText={(text) => {
               setContraseña(text);
               setError("");
+              clearError();
             }}
             placeholder="Tu contraseña"
             placeholderTextColor="#999"
           />
 
           <TouchableOpacity
-            style={styles.button}
+            style={[styles.button, isSubmitting && { opacity: 0.7 }]}
             onPress={handleLogin}
             disabled={isSubmitting}
           >
@@ -135,13 +147,17 @@ const Login: React.FC<LoginProps> = ({ navigation }) => {
             )}
           </TouchableOpacity>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </ImageBackground>
   );
 };
 
 const styles = StyleSheet.create({
-  background: { flex: 1, resizeMode: "cover", justifyContent: "center" },
+  background: {
+    flex: 1,
+    resizeMode: "cover",
+    justifyContent: "center",
+  },
   container: {
     flex: 1,
     justifyContent: "center",
@@ -155,7 +171,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   card: {
-    width: "90%",
+    width: "100%",
     maxWidth: 400,
     backgroundColor: "rgba(255, 255, 255, 0.9)",
     padding: 20,
@@ -175,9 +191,20 @@ const styles = StyleSheet.create({
     width: "100%",
     marginBottom: 20,
   },
-  subtitle: { fontSize: 14, color: "#666" },
-  registerText: { fontSize: 16, color: "#007BFF", fontWeight: "bold" },
-  label: { fontSize: 16, color: "#007BFF", marginBottom: 8 },
+  subtitle: {
+    fontSize: 14,
+    color: "#666",
+  },
+  registerText: {
+    fontSize: 16,
+    color: "#007BFF",
+    fontWeight: "bold",
+  },
+  label: {
+    fontSize: 16,
+    color: "#007BFF",
+    marginBottom: 8,
+  },
   input: {
     width: "100%",
     padding: 12,
@@ -196,7 +223,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 20,
   },
-  buttonText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
+  buttonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
   errorText: {
     color: "#FF6B6B",
     textAlign: "center",

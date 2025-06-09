@@ -27,9 +27,10 @@ const Carrito = () => {
 
   const { user } = useContext(AuthContext);
 
-  // Para simular cliente anónimo si no hay usuario logueado (opcional)
-  // Puedes reemplazar este string por algo dinámico si quieres
-  const clienteAnonimo = !user ? "anonimo-" + Date.now() : null;
+  // Código de cliente anónimo si no hay usuario logueado
+  const [clienteAnonimo, setClienteAnonimo] = useState(() =>
+    !user ? "anonimo-" + Date.now() : null
+  );
 
   const total = carrito.reduce(
     (sum, item) => sum + item.precio * (item.cantidad || 1),
@@ -37,12 +38,19 @@ const Carrito = () => {
   );
 
   const [modalPagoVisible, setModalPagoVisible] = useState(false);
-  const [metodoPago, setMetodoPago] = useState<"transferencia" | "local" | null>(null);
-  const [comprobanteBase64, setComprobanteBase64] = useState<string | null>(null);
+  const [metodoPago, setMetodoPago] = useState<
+    "transferencia" | "local" | null
+  >(null);
+  const [comprobanteBase64, setComprobanteBase64] = useState<string | null>(
+    null
+  );
   const [comprobanteMime, setComprobanteMime] = useState<string | null>(null);
   const [comprobanteUri, setComprobanteUri] = useState<string | null>(null);
   const [isProcesandoPago, setIsProcesandoPago] = useState(false);
   const [exitoVisible, setExitoVisible] = useState(false);
+
+  // Guarda la referencia del pedido (codigo anonimo o null si user)
+  const [referenciaPedido, setReferenciaPedido] = useState<string | null>(null);
 
   const abrirModalPago = () => {
     setMetodoPago(null);
@@ -76,9 +84,13 @@ const Carrito = () => {
 
   const seleccionarImagen = async () => {
     try {
-      const permisoResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const permisoResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (permisoResult.status !== "granted") {
-        Alert.alert("Permiso denegado", "Necesitas permitir acceso a la galería.");
+        Alert.alert(
+          "Permiso denegado",
+          "Necesitas permitir acceso a la galería."
+        );
         return;
       }
 
@@ -117,13 +129,19 @@ const Carrito = () => {
     }
 
     if (metodoPago === "transferencia" && !comprobanteBase64) {
-      Alert.alert("Error", "Debes subir la foto del comprobante de transferencia");
+      Alert.alert(
+        "Error",
+        "Debes subir la foto del comprobante de transferencia"
+      );
       return;
     }
 
     // Validar user o cliente anonimo
     if (!user?.id && !clienteAnonimo) {
-      Alert.alert("Error", "No se ha identificado al usuario ni cliente anónimo.");
+      Alert.alert(
+        "Error",
+        "No se ha identificado al usuario ni cliente anónimo."
+      );
       return;
     }
 
@@ -131,7 +149,10 @@ const Carrito = () => {
 
     try {
       const payload = {
-        carrito: carrito.map(({ id, cantidad }) => ({ id, cantidad: cantidad || 1 })),
+        carrito: carrito.map(({ id, cantidad }) => ({
+          id,
+          cantidad: cantidad || 1,
+        })),
         total,
         metodo_pago: metodoPago,
         comprobanteBase64,
@@ -140,13 +161,28 @@ const Carrito = () => {
         cliente_anonimo: user ? null : clienteAnonimo,
       };
 
-      const response = await axios.post("http://192.168.8.102:3000/api/pedidos", payload);
+      const response = await axios.post(
+        "http://192.168.8.102:3000/api/pedidos",
+        payload
+      );
 
       if (response.status === 201) {
         setExitoVisible(true);
         limpiarCarrito();
         setModalPagoVisible(false);
-        setTimeout(() => setExitoVisible(false), 2000);
+
+        // Guardar referencia pedido para mostrar en modal de éxito
+        if (!user && clienteAnonimo) {
+          setReferenciaPedido(clienteAnonimo);
+        } else {
+          setReferenciaPedido(null);
+        }
+
+        // Ya no cerramos automáticamente
+        // setTimeout(() => {
+        //   setExitoVisible(false);
+        //   setReferenciaPedido(null);
+        // }, 4000);
       } else {
         Alert.alert("Error", "No se pudo procesar el pedido.");
       }
@@ -158,6 +194,11 @@ const Carrito = () => {
     }
   };
 
+  const cerrarModalExito = () => {
+    setExitoVisible(false);
+    setReferenciaPedido(null);
+  };
+
   const renderItem = ({ item }: any) => (
     <View style={styles.itemContainer}>
       {item.imagen && <Image source={item.imagen} style={styles.imagen} />}
@@ -165,18 +206,28 @@ const Carrito = () => {
         <Text style={styles.nombre}>{item.nombre}</Text>
         <Text style={styles.descripcion}>{item.descripcion}</Text>
         <View style={styles.cantidadContainer}>
-          <TouchableOpacity style={styles.botonCantidad} onPress={() => decrementarCantidad(item.id)}>
+          <TouchableOpacity
+            style={styles.botonCantidad}
+            onPress={() => decrementarCantidad(item.id)}
+          >
             <Text style={styles.textoBotonCantidad}>-</Text>
           </TouchableOpacity>
           <Text style={styles.cantidadTexto}>{item.cantidad || 1}</Text>
-          <TouchableOpacity style={styles.botonCantidad} onPress={() => incrementarCantidad(item.id)}>
+          <TouchableOpacity
+            style={styles.botonCantidad}
+            onPress={() => incrementarCantidad(item.id)}
+          >
             <Text style={styles.textoBotonCantidad}>+</Text>
           </TouchableOpacity>
         </View>
         <Text style={styles.precio}>
-          ${Number(item.precio).toFixed(2)} c/u | Total: ${(item.precio * (item.cantidad || 1)).toFixed(2)}
+          ${Number(item.precio).toFixed(2)} c/u | Total:{" "}
+          {(item.precio * (item.cantidad || 1)).toFixed(2)}
         </Text>
-        <TouchableOpacity style={styles.botonQuitar} onPress={() => quitarDelCarrito(item.id)}>
+        <TouchableOpacity
+          style={styles.botonQuitar}
+          onPress={() => quitarDelCarrito(item.id)}
+        >
           <Text style={styles.textoBoton}>Quitar</Text>
         </TouchableOpacity>
       </View>
@@ -203,7 +254,10 @@ const Carrito = () => {
       </View>
 
       <TouchableOpacity
-        style={[styles.botonPagar, carrito.length === 0 && { backgroundColor: "#94d3a2" }]}
+        style={[
+          styles.botonPagar,
+          carrito.length === 0 && { backgroundColor: "#94d3a2" },
+        ]}
         onPress={abrirModalPago}
         disabled={carrito.length === 0}
       >
@@ -211,28 +265,46 @@ const Carrito = () => {
       </TouchableOpacity>
 
       {/* Modal de pago */}
-      <Modal animationType="slide" transparent visible={modalPagoVisible} onRequestClose={cerrarModalPago}>
+      <Modal
+        animationType="slide"
+        transparent
+        visible={modalPagoVisible}
+        onRequestClose={cerrarModalPago}
+      >
         <View style={styles.modalFondo}>
           <View style={styles.modalContenedor}>
             <Text style={styles.modalTitulo}>Seleccione método de pago</Text>
 
             <TouchableOpacity
-              style={[styles.opcionPago, metodoPago === "local" && styles.opcionPagoSeleccionada]}
+              style={[
+                styles.opcionPago,
+                metodoPago === "local" && styles.opcionPagoSeleccionada,
+              ]}
               onPress={() => setMetodoPago("local")}
             >
               <Text
-                style={[styles.textoOpcionPago, metodoPago === "local" && styles.textoOpcionPagoSeleccionada]}
+                style={[
+                  styles.textoOpcionPago,
+                  metodoPago === "local" && styles.textoOpcionPagoSeleccionada,
+                ]}
               >
                 Pago en local
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.opcionPago, metodoPago === "transferencia" && styles.opcionPagoSeleccionada]}
+              style={[
+                styles.opcionPago,
+                metodoPago === "transferencia" && styles.opcionPagoSeleccionada,
+              ]}
               onPress={() => setMetodoPago("transferencia")}
             >
               <Text
-                style={[styles.textoOpcionPago, metodoPago === "transferencia" && styles.textoOpcionPagoSeleccionada]}
+                style={[
+                  styles.textoOpcionPago,
+                  metodoPago === "transferencia" &&
+                    styles.textoOpcionPagoSeleccionada,
+                ]}
               >
                 Transferencia bancaria
               </Text>
@@ -240,12 +312,19 @@ const Carrito = () => {
 
             {metodoPago === "transferencia" && (
               <View style={styles.selectorImagenContainer}>
-                <TouchableOpacity style={styles.botonSeleccionarImagen} onPress={seleccionarImagen}>
+                <TouchableOpacity
+                  style={styles.botonSeleccionarImagen}
+                  onPress={seleccionarImagen}
+                >
                   <Text style={styles.textoBoton}>Seleccionar comprobante</Text>
                 </TouchableOpacity>
 
                 {comprobanteUri && (
-                  <Image source={{ uri: comprobanteUri }} style={styles.previewImagen} resizeMode="contain" />
+                  <Image
+                    source={{ uri: comprobanteUri }}
+                    style={styles.previewImagen}
+                    resizeMode="contain"
+                  />
                 )}
               </View>
             )}
@@ -276,7 +355,19 @@ const Carrito = () => {
       <Modal transparent visible={exitoVisible} animationType="fade">
         <View style={styles.exitoFondo}>
           <View style={styles.exitoContenedor}>
+            <TouchableOpacity
+              onPress={cerrarModalExito}
+              style={styles.botonCerrarModal}
+            >
+              <Text style={styles.textoCerrarModal}>✕</Text>
+            </TouchableOpacity>
+
             <Text style={styles.exitoTexto}>¡Pedido realizado con éxito!</Text>
+            {referenciaPedido && (
+              <Text style={styles.exitoReferencia}>
+                Código de referencia: {referenciaPedido}
+              </Text>
+            )}
           </View>
         </View>
       </Modal>
@@ -288,55 +379,52 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
-    backgroundColor: "#fff",
   },
   titulo: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: "bold",
-    marginBottom: 16,
+    marginBottom: 12,
   },
   vacio: {
-    fontSize: 18,
     textAlign: "center",
-    marginTop: 40,
+    fontSize: 16,
+    marginTop: 32,
   },
   itemContainer: {
     flexDirection: "row",
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "#ddd",
+    marginBottom: 16,
+    backgroundColor: "#f9f9f9",
     borderRadius: 8,
-    padding: 8,
-    backgroundColor: "#fafafa",
+    overflow: "hidden",
+    elevation: 1,
   },
   imagen: {
-    width: 80,
-    height: 80,
-    borderRadius: 6,
+    width: 100,
+    height: 100,
   },
   infoContainer: {
     flex: 1,
-    marginLeft: 12,
+    padding: 12,
+    justifyContent: "space-between",
   },
   nombre: {
     fontWeight: "bold",
-    fontSize: 16,
+    fontSize: 18,
   },
   descripcion: {
-    color: "#555",
     fontSize: 14,
-    marginVertical: 4,
+    color: "#666",
   },
   cantidadContainer: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 4,
+    marginTop: 8,
   },
   botonCantidad: {
     backgroundColor: "#007AFF",
-    borderRadius: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 2,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
   },
   textoBotonCantidad: {
     color: "#fff",
@@ -344,30 +432,29 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
   cantidadTexto: {
-    marginHorizontal: 10,
+    marginHorizontal: 12,
     fontSize: 16,
   },
   precio: {
-    marginTop: 6,
     fontWeight: "600",
+    marginTop: 8,
   },
   botonQuitar: {
-    marginTop: 8,
-    alignSelf: "flex-start",
     backgroundColor: "#FF3B30",
-    borderRadius: 6,
-    paddingHorizontal: 10,
     paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    alignSelf: "flex-start",
   },
   textoBoton: {
     color: "#fff",
     fontWeight: "600",
   },
   totalContainer: {
-    marginTop: 12,
     borderTopWidth: 1,
-    borderColor: "#ccc",
+    borderTopColor: "#ddd",
     paddingTop: 12,
+    marginTop: 12,
   },
   totalTexto: {
     fontSize: 20,
@@ -375,32 +462,33 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
   botonPagar: {
-    marginTop: 20,
     backgroundColor: "#4CAF50",
+    padding: 16,
     borderRadius: 8,
-    paddingVertical: 14,
+    marginTop: 20,
+    alignItems: "center",
   },
   textoBotonPagar: {
     color: "#fff",
-    fontSize: 18,
-    textAlign: "center",
     fontWeight: "bold",
+    fontSize: 18,
   },
   modalFondo: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: "rgba(0,0,0,0.6)",
     justifyContent: "center",
-    padding: 16,
+    alignItems: "center",
   },
   modalContenedor: {
+    width: "90%",
     backgroundColor: "#fff",
-    borderRadius: 10,
+    borderRadius: 8,
     padding: 20,
   },
   modalTitulo: {
     fontSize: 20,
     fontWeight: "bold",
-    marginBottom: 20,
+    marginBottom: 16,
     textAlign: "center",
   },
   opcionPago: {
@@ -408,68 +496,96 @@ const styles = StyleSheet.create({
     borderColor: "#007AFF",
     borderRadius: 6,
     paddingVertical: 10,
-    marginVertical: 8,
+    marginBottom: 10,
   },
   opcionPagoSeleccionada: {
     backgroundColor: "#007AFF",
   },
   textoOpcionPago: {
-    textAlign: "center",
-    fontSize: 16,
     color: "#007AFF",
+    fontWeight: "600",
+    textAlign: "center",
   },
   textoOpcionPagoSeleccionada: {
     color: "#fff",
-    fontWeight: "bold",
   },
   selectorImagenContainer: {
-    marginTop: 12,
+    marginVertical: 12,
     alignItems: "center",
   },
   botonSeleccionarImagen: {
     backgroundColor: "#007AFF",
-    borderRadius: 6,
     paddingVertical: 10,
     paddingHorizontal: 20,
+    borderRadius: 6,
     marginBottom: 12,
   },
   previewImagen: {
-    width: 200,
+    width: 150,
     height: 150,
     borderRadius: 8,
   },
   botonesModal: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 20,
   },
   botonModal: {
     flex: 1,
     paddingVertical: 12,
-    borderRadius: 8,
-    marginHorizontal: 5,
+    borderRadius: 6,
+    marginHorizontal: 4,
+    alignItems: "center",
   },
   botonCancelar: {
-    backgroundColor: "#ccc",
+    backgroundColor: "#999",
   },
   botonEnviar: {
     backgroundColor: "#4CAF50",
   },
   exitoFondo: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
+    backgroundColor: "rgba(0, 100, 0, 0.85)",
     justifyContent: "center",
     alignItems: "center",
   },
   exitoContenedor: {
-    backgroundColor: "#4CAF50",
-    padding: 30,
+    backgroundColor: "#007700",
+    padding: 24,
     borderRadius: 12,
+    width: "85%",
+    alignItems: "center",
+    position: "relative",
   },
   exitoTexto: {
     color: "#fff",
+    fontSize: 22,
+    fontWeight: "bold",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  exitoReferencia: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 16,
+    textAlign: "center",
+  },
+  botonCerrarModal: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    zIndex: 10,
+    backgroundColor: "#005500",
+    borderRadius: 12,
+    width: 28,
+    height: 28,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  textoCerrarModal: {
+    color: "#fff",
     fontSize: 20,
     fontWeight: "bold",
+    lineHeight: 20,
   },
 });
 

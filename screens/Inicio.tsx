@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -12,6 +12,9 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import Carrusel from "@/components/Carrusel";
 import { NavigationProp, ParamListBase } from "@react-navigation/native";
+import CategoriasVisual from "@/components/CategoriasVisual";
+import axios from "axios";
+import { useAuth } from "@/context/AuthContext";
 
 interface Props {
   navigation: NavigationProp<ParamListBase>;
@@ -20,61 +23,158 @@ interface Props {
 const { width } = Dimensions.get("window");
 
 export default function Inicio({ navigation }: Props) {
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+  const [pedidos, setPedidos] = useState<any[]>([]);
+  const [hayCambiosEstado, setHayCambiosEstado] = useState(false);
+  const { user: usuario } = useAuth();
+
+  const pedidosPrevRef = useRef<any[]>([]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (usuario?.id) {
+        axios
+          .get(`http://192.168.8.102:3000/api/pedidos/usuario/${usuario.id}`)
+          .then((res) => {
+            const nuevosPedidos = res.data;
+            setPedidos(nuevosPedidos);
+
+            const prevPedidos = pedidosPrevRef.current;
+            let cambioDetectado = false;
+
+            for (const nuevo of nuevosPedidos) {
+              const prev = prevPedidos.find((p) => p.id === nuevo.id);
+              if (prev && prev.estado !== nuevo.estado) {
+                cambioDetectado = true;
+                break;
+              }
+            }
+
+            pedidosPrevRef.current = nuevosPedidos;
+            setHayCambiosEstado(cambioDetectado);
+          })
+          .catch((err) => console.error("Error al obtener pedidos:", err));
+      }
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [usuario]);
+
+  const pedidosPendientes = pedidos.filter(
+    (pedido) => pedido.estado !== "realizado" && pedido.estado !== "cancelado"
+  );
+
+  const ultimoPedido = pedidosPendientes.slice(-1); // solo el último pendiente
+
+  const contadorNotificaciones = hayCambiosEstado
+    ? 1
+    : ultimoPedido.length > 0
+    ? 1
+    : 0;
+
+  const eliminarNotificacion = (pedidoId: number) => {
+    setPedidos((prev) => prev.filter((p) => p.id !== pedidoId));
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <Image
         source={require("@/assets/images/Fondos/Fondo_Principal.png")}
         style={[StyleSheet.absoluteFillObject, styles.backgroundImage]}
       />
+
       <ScrollView
         contentContainerStyle={styles.scrollContainer}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={!tooltipVisible}
       >
-        {/* Encabezado */}
+        {/* HEADER */}
         <View style={styles.header}>
           <Text style={styles.title}>TacoFish</Text>
-          <Ionicons name="notifications-outline" size={28} color="#000000" />
+          <TouchableOpacity onPress={() => setTooltipVisible(!tooltipVisible)}>
+            <View>
+              <Ionicons name="notifications-outline" size={28} color="#000" />
+              {contadorNotificaciones > 0 && (
+                <View style={styles.notificationBadge}>
+                  <Text style={styles.notificationText}>
+                    {contadorNotificaciones}
+                  </Text>
+                </View>
+              )}
+            </View>
+          </TouchableOpacity>
         </View>
+
         <Text style={styles.subtitle}>
           La mejor comida del mar de la sierra
         </Text>
         <View style={styles.divider} />
 
-        {/* Platillos Destacados */}
+        {/* DESTACADOS */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Platillos Destacados</Text>
           </View>
-          <Carrusel />
+          <Carrusel modoLoop={true} />
         </View>
 
-        {/* Categorías */}
-        <View style={styles.section}>
-          <Text style={styles.categoryTitle}>Nuestras Categorías</Text>
-          <View style={styles.categories}>
-            <View style={styles.categoryCard}>
-              <Image
-                source={require("@/assets/images/Categorias/Categoria1.jpg")}
-                style={styles.categoryImage}
-              />
-              <View style={styles.categoryTextContainer}>
-                <Text style={styles.bold}>Tacos</Text>
-                <Text>7 Platillos</Text>
-              </View>
-            </View>
-            <View style={styles.categoryCard}>
-              <Image
-                source={require("@/assets/images/Categorias/Categoria2.jpg")}
-                style={styles.categoryImage}
-              />
-              <View style={styles.categoryTextContainer}>
-                <Text style={styles.bold}>Mariscos Calientes</Text>
-                <Text>9 Platillos</Text>
-              </View>
-            </View>
-          </View>
-        </View>
+        <Text style={styles.sectionTitle}>Categorias</Text>
+        <CategoriasVisual />
       </ScrollView>
+
+      {/* TOOLTIP */}
+      {tooltipVisible && (
+        <>
+          <TouchableOpacity
+            style={styles.overlay}
+            activeOpacity={1}
+            onPress={() => setTooltipVisible(false)}
+          />
+          <View style={[styles.tooltip, { top: 100, right: 20 }]}>
+            {ultimoPedido.length === 0 ? (
+              <Text style={styles.noNotificationsText}>
+                No tienes nuevas notificaciones.
+              </Text>
+            ) : (
+              ultimoPedido.map((pedido) => (
+                <View key={pedido.id} style={styles.notificationCard}>
+                  <View style={styles.notificationInfo}>
+                    <Text style={styles.notificationTitle}>
+                      Pedido #{pedido.id}
+                    </Text>
+                    <Text style={styles.notificationDetail}>
+                      Método:{" "}
+                      <Text style={styles.boldText}>{pedido.metodo_pago}</Text>
+                    </Text>
+                    <Text style={styles.notificationDetail}>
+                      Total:{" "}
+                      <Text style={styles.boldText}>
+                        ${Number(pedido.total).toFixed(2)}
+                      </Text>
+                    </Text>
+                    <Text
+                      style={[styles.notificationDetail, styles.statusText]}
+                    >
+                      Estado: {pedido.estado}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => eliminarNotificacion(pedido.id)}
+                    style={styles.deleteButton}
+                    activeOpacity={0.7}
+                    accessibilityLabel={`Eliminar notificación pedido ${pedido.id}`}
+                  >
+                    <Ionicons name="close" size={20} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+            <TouchableOpacity onPress={() => setTooltipVisible(false)}>
+              <Text style={styles.tooltipClose}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
     </SafeAreaView>
   );
 }
@@ -129,38 +229,103 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 24,
     fontWeight: "600",
+    marginHorizontal: 20,
+    marginTop: 20,
   },
-  categoryTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-  },
-  categories: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
-    marginTop: 10,
-  },
-  categoryCard: {
-    width: "48%",
-    marginBottom: 15,
-    alignItems: "center",
-    overflow: "hidden",
-    borderRadius: 10,
-  },
-  categoryImage: {
-    width: "100%",
-    height: 130,
-    borderRadius: 10,
-  },
-  categoryTextContainer: {
+  notificationBadge: {
     position: "absolute",
-    bottom: 0,
-    width: "100%",
-    backgroundColor: "#F2F2F2",
-    paddingVertical: 5,
+    top: -4,
+    right: -4,
+    backgroundColor: "#FF3B30",
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    minWidth: 20,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  notificationText: {
+    color: "white",
+    fontSize: 12,
+    fontWeight: "bold",
+  },
+  tooltip: {
+    position: "absolute",
+    backgroundColor: "white",
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    width: 280,
+    maxHeight: 350,
+    zIndex: 1000,
+  },
+  noNotificationsText: {
+    fontSize: 16,
+    color: "#666",
+    textAlign: "center",
+    paddingVertical: 20,
+  },
+  notificationCard: {
+    flexDirection: "row",
+    backgroundColor: "#f9f9f9",
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 1 },
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  notificationInfo: {
+    flex: 1,
+  },
+  notificationTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#0084FF",
+    marginBottom: 4,
+  },
+  notificationDetail: {
+    fontSize: 14,
+    color: "#333",
+    marginBottom: 2,
+  },
+  boldText: {
+    fontWeight: "700",
+  },
+  statusText: {
+    color: "#005BBB",
+    fontWeight: "700",
+  },
+  deleteButton: {
+    backgroundColor: "#FF3B30",
+    borderRadius: 20,
+    padding: 6,
+    marginLeft: 10,
+    justifyContent: "center",
     alignItems: "center",
   },
-  bold: {
-    fontWeight: "bold",
+  tooltipClose: {
+    color: "#0084FF",
+    fontWeight: "600",
+    textAlign: "right",
+    marginTop: 10,
+    fontSize: 16,
+  },
+  overlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    zIndex: 999,
   },
 });

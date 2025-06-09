@@ -61,7 +61,7 @@ const ProfileRedirect = () => {
 };
 
 const HomeTabs = () => {
-  const { carrito } = useCarrito(); // 🔥 aquí se accede al contexto del carrito
+  const { carrito } = useCarrito(); 
 
   return (
     <Tab.Navigator
@@ -101,7 +101,6 @@ const HomeTabs = () => {
         name="Carrito"
         component={Carrito}
         options={{
-          // 🔔 Aquí se muestra el número del carrito como badge
           tabBarBadge: carrito.length > 0 ? carrito.length : undefined,
         }}
       />
@@ -114,8 +113,7 @@ const App = () => {
   return (
     <AuthProvider>
       <CarritoProvider>
-        <HomeTabs />{" "}
-        {/* El NavigationContainer debe estar fuera de este archivo */}
+        <HomeTabs />
       </CarritoProvider>
     </AuthProvider>
   );

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -6,162 +6,296 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
+  Dimensions,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
 } from "react-native";
-import { Rating } from "react-native-ratings";
 
 interface Platillo {
   id: number;
   nombre: string;
   descripcion: string;
-  precio: number;
-  promedio_calificacion: number;
-  numero_calificaciones: number;
-  imagen: string; // Base64
+  precio: number | null | undefined;
+  calificacion_promedio: number;
+  total_calificaciones: number;
+  imagen: string;
 }
 
-const Carrusel = () => {
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const CARD_WIDTH = SCREEN_WIDTH * 0.6; // Más compacto
+const CARD_SPACING = 14;
+
+interface CarruselProps {
+  modoLoop?: boolean; // true: loop continuo, false: ping-pong
+}
+
+const Carrusel: React.FC<CarruselProps> = ({ modoLoop = false }) => {
   const [platillos, setPlatillos] = useState<Platillo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  const directionRef = useRef(1); // 1 = derecha, -1 = izquierda
 
   useEffect(() => {
     const obtenerPlatillos = async () => {
       try {
-        const response = await fetch("http://10.19.100.95/platillos/mejores");
-        const data = await response.json();
-        setPlatillos(data);
+        const response = await fetch(
+          "http://192.168.8.102:3000/api/platillos/mejores-calificados"
+        );
+        const text = await response.text();
+        const data = JSON.parse(text);
+
+        if (Array.isArray(data)) {
+          setPlatillos(data);
+        }
       } catch (error) {
         console.error("Error al cargar los platillos:", error);
       } finally {
         setLoading(false);
       }
     };
-
     obtenerPlatillos();
   }, []);
+
+  useEffect(() => {
+    if (platillos.length <= 1) return;
+
+    const interval = setInterval(() => {
+      setActiveIndex((prevIndex) => {
+        let nextIndex = prevIndex + directionRef.current;
+
+        if (modoLoop) {
+          // Modo loop continuo
+          if (nextIndex >= platillos.length) {
+            nextIndex = 0;
+          }
+        } else {
+          // Modo ping-pong
+          if (nextIndex >= platillos.length) {
+            directionRef.current = -1;
+            nextIndex = platillos.length - 2;
+          } else if (nextIndex < 0) {
+            directionRef.current = 1;
+            nextIndex = 1;
+          }
+        }
+
+        scrollViewRef.current?.scrollTo({
+          x: nextIndex * (CARD_WIDTH + CARD_SPACING),
+          animated: true,
+        });
+
+        return nextIndex;
+      });
+    }, 3500);
+
+    return () => clearInterval(interval);
+  }, [platillos, modoLoop]);
+
+  const onScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const scrollX = event.nativeEvent.contentOffset.x;
+    const index = Math.round(scrollX / (CARD_WIDTH + CARD_SPACING));
+    setActiveIndex(index);
+  };
 
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#e67e22" />
-        <Text>Cargando platillos destacados...</Text>
+        <ActivityIndicator size="large" color="#0084FF" />
+        <Text style={styles.loadingText}>Cargando platillos destacados...</Text>
+      </View>
+    );
+  }
+
+  if (platillos.length === 0) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.loadingText}>
+          No hay platillos destacados disponibles.
+        </Text>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.titulo}>Platillos Destacados ⭐</Text>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.carrusel}
+        ref={scrollViewRef}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        pagingEnabled={false}
       >
-        {platillos.map((platillo) => (
-          <View key={platillo.id} style={styles.tarjeta}>
-            <Image
-              source={{ uri: platillo.imagen }}
-              style={styles.imagen}
-              resizeMode="cover"
-            />
-            <View style={styles.contenido}>
-              <Text style={styles.nombre}>{platillo.nombre}</Text>
-              <Text style={styles.precio}>${platillo.precio.toFixed(2)}</Text>
-              <View style={styles.ratingContainer}>
-                <Rating
-                  type="star"
-                  ratingCount={5}
-                  imageSize={20}
-                  readonly
-                  startingValue={platillo.promedio_calificacion}
-                  tintColor="#f8f8f8"
-                  ratingBackgroundColor="#c8c7c8"
+        {platillos.map((platillo) => {
+          const imagenUri =
+            platillo.imagen && platillo.imagen.trim() !== ""
+              ? platillo.imagen.startsWith("data:image")
+                ? platillo.imagen
+                : `data:image/jpeg;base64,${platillo.imagen}`
+              : null;
+
+          const precioNum = Number(platillo.precio);
+          const precioFormateado = !isNaN(precioNum)
+            ? precioNum.toFixed(2)
+            : "0.00";
+
+          const calificacionPromedio =
+            Number(platillo.calificacion_promedio) || 0;
+
+          return (
+            <View key={platillo.id} style={styles.tarjeta}>
+              {imagenUri ? (
+                <Image
+                  source={{ uri: imagenUri }}
+                  style={styles.imagen}
+                  resizeMode="cover"
                 />
-                <Text style={styles.calificacionText}>
-                  {platillo.promedio_calificacion.toFixed(1)}
+              ) : (
+                <View
+                  style={[
+                    styles.imagen,
+                    { justifyContent: "center", alignItems: "center" },
+                  ]}
+                >
+                  <Text style={{ color: "#aaa" }}>Sin imagen</Text>
+                </View>
+              )}
+
+              <View style={styles.contenido}>
+                <Text
+                  style={styles.nombre}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  {platillo.nombre || "Nombre no disponible"}
+                </Text>
+
+                <Text style={styles.precio}>${precioFormateado}</Text>
+
+                <View style={styles.ratingSimpleContainer}>
+                  <Text style={styles.ratingNumber}>
+                    {calificacionPromedio.toFixed(1)}{" "}
+                    <Text style={styles.star}>★</Text>
+                  </Text>
+                </View>
+
+                <Text
+                  style={styles.descripcion}
+                  numberOfLines={2}
+                  ellipsizeMode="tail"
+                >
+                  {platillo.descripcion || "Sin descripción"}
                 </Text>
               </View>
-              <Text style={styles.descripcion} numberOfLines={2}>
-                {platillo.descripcion}
-              </Text>
             </View>
-          </View>
-        ))}
+          );
+        })}
       </ScrollView>
+
+      <View style={styles.indicatorsContainer}>
+        {platillos.map((_, i) => (
+          <View
+            key={i}
+            style={[
+              styles.indicator,
+              i === activeIndex && styles.indicatorActive,
+            ]}
+          />
+        ))}
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    marginVertical: 20,
-    backgroundColor: "#f8f8f8",
+    marginVertical: 12,
     paddingVertical: 10,
-    borderRadius: 15,
-  },
-  titulo: {
-    fontSize: 22,
-    fontWeight: "bold",
-    marginLeft: 20,
-    marginBottom: 15,
-    color: "#2c3e50",
   },
   carrusel: {
-    paddingHorizontal: 15,
-    paddingBottom: 10,
+    paddingHorizontal: 16,
   },
   tarjeta: {
-    width: 250,
-    backgroundColor: "white",
-    borderRadius: 15,
-    marginRight: 20,
+    width: CARD_WIDTH,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    marginRight: CARD_SPACING,
     overflow: "hidden",
+    shadowColor: "#0084FF",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
     elevation: 5,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
   },
   imagen: {
     width: "100%",
-    height: 160,
-    borderTopLeftRadius: 15,
-    borderTopRightRadius: 15,
+    height: 140,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    backgroundColor: "#f0f0f0",
   },
   contenido: {
-    padding: 15,
+    padding: 12,
   },
   nombre: {
     fontSize: 18,
     fontWeight: "700",
-    marginBottom: 6,
-    color: "#2c3e50",
+    marginBottom: 4,
+    color: "#222",
   },
   precio: {
-    fontSize: 17,
-    fontWeight: "bold",
-    color: "#e74c3c",
-    marginBottom: 10,
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#FF5A5F",
+    marginBottom: 6,
   },
-  ratingContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 10,
+  ratingSimpleContainer: {
+    marginBottom: 8,
   },
-  calificacionText: {
+  ratingNumber: {
     fontSize: 14,
-    color: "#f39c12",
-    marginLeft: 8,
+    color: "#0084FF",
     fontWeight: "700",
   },
+  star: {
+    color: "#FFB400",
+    fontSize: 16,
+  },
   descripcion: {
-    fontSize: 13,
-    color: "#7f8c8d",
+    fontSize: 12,
+    color: "#666",
     lineHeight: 18,
   },
   loadingContainer: {
     padding: 20,
     alignItems: "center",
     justifyContent: "center",
+  },
+  loadingText: {
+    marginTop: 8,
+    fontSize: 14,
+    color: "#555",
+  },
+  indicatorsContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    marginTop: 10,
+  },
+  indicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#bbb",
+    marginHorizontal: 4,
+  },
+  indicatorActive: {
+    backgroundColor: "#0084FF",
+    width: 12,
+    height: 12,
+    borderRadius: 6,
   },
 });
 

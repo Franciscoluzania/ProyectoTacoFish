@@ -304,43 +304,120 @@ app.get("/verify-token", authenticate, async (req, res) => {
   }
 });
 
+app.post('/api/usuarios', async (req, res) => {
+  const { nombre, contraseña, telefono, tipo_usuario = 'cliente' } = req.body;
 
-app.get("/usuarios", (req, res) => {
-  db.execute("SELECT * FROM usuarios")
-    .then(([rows, fields]) => {
-      res.json(rows); // Devolver los resultados como JSON
-    })
-    .catch((err) => {
-      console.error("❌ Error al obtener usuarios:", err.message);
-      res.status(500).send("Error al obtener usuarios");
-    });
-});
-// POST: Crear nuevo usuario
-// Ruta para agregar un nuevo usuario
-app.post("/usuarios", express.json(), (req, res) => {
-  const { nombre, contraseña, telefono, tipo_usuario } = req.body;
-  
-  // Verificar que se reciban todos los campos
-  if (!nombre || !contraseña || !telefono || !tipo_usuario) {
-    return res.status(400).send("Faltan datos requeridos");
+  if (!nombre || !contraseña || !telefono) {
+    return res.status(400).json({ error: 'Faltan datos obligatorios' });
   }
 
-  const query = "INSERT INTO usuarios (nombre, contraseña, telefono, tipo_usuario) VALUES (?, ?, ?, ?)";
-  
-  db.execute(query, [nombre, contraseña, telefono, tipo_usuario])
-    .then(([result]) => {
-      res.status(201).send(`Usuario creado con ID: ${result.insertId}`);
-    })
-    .catch((err) => {
-      console.error("❌ Error al agregar usuario:", err.message);
-      res.status(500).send("Error al agregar usuario");
+  try {
+    // Hashear la contraseña
+    const hashedPassword = await bcrypt.hash(contraseña, 10);
+
+    // Insertar el usuario en la base de datos
+    const sql = `INSERT INTO usuarios (nombre, contraseña, telefono, tipo_usuario) VALUES (?, ?, ?, ?)`;
+    db.query(sql, [nombre, hashedPassword, telefono, tipo_usuario], (err, result) => {
+      if (err) {
+        console.error(err);
+        if (err.code === 'ER_DUP_ENTRY') {
+          return res.status(409).json({ error: 'El teléfono ya está registrado' });
+        }
+        return res.status(500).json({ error: 'Error al crear usuario' });
+      }
+      res.status(201).json({ message: 'Usuario creado correctamente', usuarioId: result.insertId });
     });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error al procesar la solicitud' });
+  }
+});
+// Obtener todos los usuarios (GET)
+app.get('/api/usuarios', async (req, res) => {
+  try {
+    const [usuarios] = await db.query(
+      'SELECT id, nombre, telefono, tipo_usuario, fecha_registro FROM usuarios'
+    );
+    res.json(usuarios);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error al obtener usuarios' });
+  }
+});
+
+// Obtener usuario por ID (GET)
+app.get('/api/usuarios/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ message: 'ID inválido' });
+
+  try {
+    const [rows] = await db.query(
+      'SELECT id, nombre, telefono, tipo_usuario, fecha_registro FROM usuarios WHERE id = ?',
+      [id]
+    );
+    if (rows.length === 0) return res.status(404).json({ message: 'Usuario no encontrado' });
+    res.json(rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error al obtener usuario' });
+  }
+});
+
+// Actualizar usuario (PUT)
+app.put('/api/usuarios/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ message: 'ID inválido' });
+
+  const { nombre, contraseña, telefono, tipo_usuario } = req.body;
+  if (!nombre || !telefono || !tipo_usuario) {
+    return res.status(400).json({ message: 'Faltan datos obligatorios para la actualización' });
+  }
+
+  try {
+    // Verificar que el usuario exista
+    const [rows] = await db.query('SELECT * FROM usuarios WHERE id = ?', [id]);
+    if (rows.length === 0) return res.status(404).json({ message: 'Usuario no encontrado' });
+
+    let query = 'UPDATE usuarios SET nombre = ?, telefono = ?, tipo_usuario = ?';
+    const params = [nombre, telefono, tipo_usuario];
+
+    if (contraseña && contraseña.trim() !== '') {
+      const hashedPassword = await bcrypt.hash(contraseña, 10);
+      query += ', contraseña = ?';
+      params.push(hashedPassword);
+    }
+
+    query += ' WHERE id = ?';
+    params.push(id);
+
+    await db.query(query, params);
+    res.json({ message: 'Usuario actualizado correctamente' });
+  } catch (error) {
+    console.error(error);
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'Teléfono ya registrado' });
+    }
+    res.status(500).json({ message: 'Error al actualizar usuario' });
+  }
+});
+
+// Eliminar usuario (DELETE)
+app.delete('/api/usuarios/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ message: 'ID inválido' });
+
+  try {
+    const [result] = await db.query('DELETE FROM usuarios WHERE id = ?', [id]);
+    if (result.affectedRows === 0) return res.status(404).json({ message: 'Usuario no encontrado' });
+    res.json({ message: 'Usuario eliminado correctamente' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error al eliminar usuario' });
+  }
 });
 // Crear un nuevo pedido
 app.post('/api/pedidos', async (req, res) => {
   try {
-    console.log("📥 Body recibido:", req.body);
-
     const {
       carrito,
       total,
@@ -420,165 +497,123 @@ app.post('/api/pedidos', async (req, res) => {
 });
 app.get('/api/pedidos', async (req, res) => {
   try {
-    // Traer todos los pedidos con usuario y detalles
     const [pedidosRows] = await db.query(`
-      SELECT p.id, p.usuario_id, p.cliente_anonimo, p.metodo_pago, p.total, p.comprobante, p.comprobante_mime,
+      SELECT p.id, p.usuario_id, p.cliente_anonimo, p.metodo_pago, p.total, 
+             p.comprobante, p.comprobante_mime, p.fecha, p.estado,
              u.nombre AS usuario_nombre
       FROM pedidos p
       LEFT JOIN usuarios u ON p.usuario_id = u.id
       ORDER BY p.id DESC
     `);
 
-    // Para cada pedido traer los detalles
-    const pedidosConDetalles = await Promise.all(pedidosRows.map(async pedido => {
-      // Obtener detalles del pedido
-      const [detalles] = await db.query(`
-        SELECT platillo_id, cantidad FROM pedido_detalle WHERE pedido_id = ?
-      `, [pedido.id]);
+    const pedidosConDetalles = await Promise.all(
+      pedidosRows.map(async (pedido) => {
+        const [detalles] = await db.query(`
+          SELECT 
+            pd.platillo_id, 
+            pd.cantidad, 
+            pl.nombre AS platillo_nombre, 
+            pl.precio AS platillo_precio
+          FROM pedido_detalle pd
+          JOIN platillo pl ON pd.platillo_id = pl.id
+          WHERE pd.pedido_id = ?
+        `, [pedido.id]);
 
-      // Convertir comprobante BLOB a base64 para enviar como string
-      let comprobanteBase64 = null;
-      if (pedido.comprobante) {
-        comprobanteBase64 = Buffer.from(pedido.comprobante).toString('base64');
-      }
+        let comprobanteBase64 = null;
+        if (pedido.comprobante) {
+          comprobanteBase64 = Buffer.from(pedido.comprobante).toString('base64');
+        }
 
-      return {
-        id: pedido.id,
-        usuario: pedido.usuario_id ? { id: pedido.usuario_id, nombre: pedido.usuario_nombre } : { anonimo: true, identificador: pedido.cliente_anonimo },
-        metodo_pago: pedido.metodo_pago,
-        total: pedido.total,
-        comprobante: comprobanteBase64 ? `data:${pedido.comprobante_mime};base64,${comprobanteBase64}` : null,
-        detalles: detalles.map(d => ({ platillo_id: d.platillo_id, cantidad: d.cantidad })),
-      };
-    }));
+        return {
+          id: pedido.id,
+          usuario: pedido.usuario_id
+            ? { id: pedido.usuario_id, nombre: pedido.usuario_nombre }
+            : { anonimo: true, identificador: pedido.cliente_anonimo },
+          metodo_pago: pedido.metodo_pago,
+          total: pedido.total,
+          fecha: pedido.fecha,
+          estado: pedido.estado, // ✅ Campo nuevo
+          comprobante: comprobanteBase64
+            ? `data:${pedido.comprobante_mime};base64,${comprobanteBase64}`
+            : null,
+          detalles: detalles.map(d => ({
+            platillo_id: d.platillo_id,
+            nombre: d.platillo_nombre,
+            precio: d.platillo_precio,
+            cantidad: d.cantidad
+          }))
+        };
+      })
+    );
 
     res.json(pedidosConDetalles);
-
   } catch (error) {
     console.error('❌ Error al obtener pedidos:', error);
     res.status(500).json({ message: 'Error del servidor' });
   }
 });
 
-
-
-// Obtener un pedido por ID
-app.get('/api/pedidos/:id', async (req, res) => {
-  const pedidoId = req.params.id;
-  try {
-    console.log("Buscando pedido ID:", pedidoId);
-
-    const [[pedido]] = await db.query(
-      `SELECT id, metodo_pago, total, estado, fecha 
-       FROM pedidos 
-       WHERE id = ?`,
-      [pedidoId]
-    );
-
-    if (!pedido) {
-      console.log("Pedido no encontrado:", pedidoId);
-      return res.status(404).json({ message: 'Pedido no encontrado' });
-    }
-    console.log("Pedido encontrado:", pedido);
-
-    const [detalle] = await db.query(
-      `SELECT platillo_id, cantidad 
-       FROM pedido_detalle 
-       WHERE pedido_id = ?`,
-      [pedidoId]
-    );
-
-    console.log("Detalle obtenido:", detalle.length);
-    res.json({ pedido, detalle });
-  } catch (error) {
-    console.error("Error en GET /api/pedidos/:id:", error);
-    res.status(500).json({ message: 'Error al obtener pedido' });
-  }
-});
-
-// Obtener el comprobante de un pedido
-app.get('/api/pedidos/:id/comprobante', async (req, res) => {
-  const pedidoId = req.params.id;
-  try {
-    console.log("Solicitando comprobante para pedido ID:", pedidoId);
-
-    const [rows] = await db.query(
-      `SELECT comprobante, comprobante_mime 
-       FROM pedidos 
-       WHERE id = ?`,
-      [pedidoId]
-    );
-
-    if (rows.length === 0 || !rows[0].comprobante) {
-      console.log("No se encontró comprobante para pedido ID:", pedidoId);
-      return res.status(404).send('No se encontró comprobante');
-    }
-
-    console.log("Enviando comprobante, tipo MIME:", rows[0].comprobante_mime);
-    res.setHeader('Content-Type', rows[0].comprobante_mime || 'image/jpeg');
-    res.send(rows[0].comprobante);
-  } catch (error) {
-    console.error("Error en GET /api/pedidos/:id/comprobante:", error);
-    res.status(500).send('Error al obtener imagen');
-  }
-});
-
-app.get("/api/pedidos", (req, res) => {
-  const sql = `
-    SELECT 
-      id, 
-      metodo_pago, 
-      total, 
-      fecha, 
-      estado 
-    FROM pedidos 
-    ORDER BY fecha DESC
-  `;
-
-  db.query(sql, (err, results) => {
-    if (err) {
-      console.error(err);
-      return res.status(500).json({ error: "Error al obtener pedidos" });
-    }
-    res.json(results);
-  });
-});
-app.get("/api/pedidos/:id/comprobante", (req, res) => {
-  const pedidoId = req.params.id;
-  const sql = "SELECT comprobante, comprobante_mime FROM pedidos WHERE id = ?";
-  db.query(sql, [pedidoId], (err, results) => {
-    if (err || results.length === 0) {
-      return res.status(404).send("Comprobante no encontrado");
-    }
-
-    const { comprobante, comprobante_mime } = results[0];
-    res.setHeader("Content-Type", comprobante_mime);
-    res.send(comprobante);
-  });
-});
-
-
-// Actualizar estado de un pedido
-app.patch("/api/pedidos/:id/estado", (req, res) => {
-  const { id } = req.params;
+app.put('/api/pedidos/:id/estado', async (req, res) => {
+  const id = parseInt(req.params.id);
   const { estado } = req.body;
-  const estadosValidos = ["en_proceso", "realizado", "cancelado"];
+const estadosValidos = ['pendiente', 'pagado', 'cancelado'];
 
   if (!estadosValidos.includes(estado)) {
-    return res.status(400).json({ error: "Estado no válido" });
+    return res.status(400).json({ message: 'Estado no válido' });
   }
 
-  const sql = "UPDATE pedidos SET estado = ? WHERE id = ?";
-  db.query(sql, [estado, id], (err, result) => {
-    if (err) {
-      console.error(err);
-      return res.status(500).json({ error: "Error al actualizar estado" });
-    }
+  try {
+    const [result] = await db.query('UPDATE pedidos SET estado = ? WHERE id = ?', [estado, id]);
     if (result.affectedRows === 0) {
-      return res.status(404).json({ error: "Pedido no encontrado" });
+      return res.status(404).json({ message: 'Pedido no encontrado' });
     }
-    res.json({ message: "Estado actualizado correctamente" });
-  });
+
+    // Solo devolver el id y estado actualizado para simplicidad
+    res.json({ id, estado });
+  } catch (error) {
+    console.error('Error al actualizar estado:', error);
+    res.status(500).json({ message: 'Error del servidor' });
+  }
+});
+app.get('/api/pedidos/usuario/:usuarioId', async (req, res) => {
+  const usuarioId = parseInt(req.params.usuarioId);
+  try {
+    const [result] = await db.query(
+      'SELECT id, metodo_pago, total, estado, fecha FROM pedidos WHERE usuario_id = ? ORDER BY fecha DESC',
+      [usuarioId]
+    );
+    res.json(result);
+  } catch (error) {
+    console.error('Error al obtener pedidos del usuario:', error);
+    res.status(500).json({ message: 'Error al obtener pedidos' });
+  }
+});
+
+
+// DELETE /api/pedidos/:id
+app.delete('/api/pedidos/:id', async (req, res) => {
+  const pedidoId = parseInt(req.params.id, 10);
+
+  if (isNaN(pedidoId)) {
+    return res.status(400).json({ message: 'ID de pedido inválido' });
+  }
+
+  try {
+    // Verificar si existe el pedido
+    const [rows] = await db.query('SELECT id FROM pedidos WHERE id = ?', [pedidoId]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Pedido no encontrado' });
+    }
+
+    // Borrar el pedido; por la FK con ON DELETE CASCADE se borran detalles automáticamente
+    await db.query('DELETE FROM pedidos WHERE id = ?', [pedidoId]);
+
+    res.json({ message: 'Pedido eliminado correctamente' });
+  } catch (error) {
+    console.error('Error al eliminar pedido:', error);
+    res.status(500).json({ message: 'Error al eliminar pedido' });
+  }
 });
 
 
@@ -929,126 +964,107 @@ app.post('/platillos/:id/calificaciones', authenticate, async (req, res) => {
   }
 });
 
-// Endpoint para borrar calificación
-app.delete('/calificaciones/:id', authenticate, async (req, res) => {
+
+
+app.get('/api/platillos/mejores-calificados', async (req, res) => {
   try {
-    const calificacionId = req.params.id;
-    const usuarioId = req.user.id;
+    // Obtener platillos con mejor calificación
+    const [calificados] = await db.query(`
+      SELECT
+        p.id,
+        p.nombre,
+        p.descripcion,
+        p.imagen,
+        p.precio,
+        AVG(cp.calificacion) AS calificacion_promedio,
+        COUNT(cp.id) AS total_calificaciones
+      FROM platillo p
+      JOIN calificaciones_platillos cp ON p.id = cp.platillo_id
+      GROUP BY p.id, p.nombre, p.descripcion, p.imagen, p.precio
+      ORDER BY calificacion_promedio DESC, total_calificaciones DESC
+      LIMIT 10
+    `);
 
-    // Verificar que la calificación pertenece al usuario
-    const [calificacion] = await db.query(`
-      SELECT id FROM calificaciones_platillos 
-      WHERE id = ? AND usuario_id = ?
-    `, [calificacionId, usuarioId]);
+    let result = [...calificados];
 
-    if (calificacion.length === 0) {
-      return res.status(403).json({ error: 'No autorizado' });
-    }
+    // Si hay menos de 10 calificados, completar con aleatorios distintos
+    if (result.length < 10) {
+      const idsYaIncluidos = result.map(p => p.id);
+      const limite = 10 - result.length;
 
-    const [result] = await db.query(`
-      DELETE FROM calificaciones_platillos 
-      WHERE id = ?
-    `, [calificacionId]);
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Calificación no encontrada' });
-    }
-
-    res.json({ success: true });
-
-  } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ error: 'Error al borrar calificación' });
-  }
-});
-
-app.get("/platillos/mejores", async (req, res) => {
-  try {
-    // Verificar si hay calificaciones registradas
-    const [hasRatings] = await db.query(
-      "SELECT COUNT(*) as count FROM calificaciones_platillos"
-    );
-
-    if (hasRatings[0].count === 0) {
-      // Si no hay calificaciones, retornar 5 platillos aleatorios
-      const [randomDishes] = await db.query(`
-        SELECT 
+      const [aleatorios] = await db.query(`
+        SELECT
           p.id,
           p.nombre,
           p.descripcion,
-          p.precio,
           p.imagen,
-          0 AS promedio_calificacion,
-          0 AS numero_calificaciones
+          p.precio
+        FROM platillo p
+        WHERE p.id NOT IN (?)
+        ORDER BY RAND()
+        LIMIT ?
+      `, [idsYaIncluidos.length ? idsYaIncluidos : [0], limite]);
+
+      // Agregar datos falsos de calificación para mantener consistencia
+      const aleatoriosConCalificacion = aleatorios.map(p => ({
+        ...p,
+        calificacion_promedio: 0,
+        total_calificaciones: 0
+      }));
+
+      result = result.concat(aleatoriosConCalificacion);
+    }
+
+    // Si por alguna razón no hay ningún platillo, devolver al menos 5 aleatorios
+    if (result.length === 0) {
+      const [fallback] = await db.query(`
+        SELECT
+          p.id,
+          p.nombre,
+          p.descripcion,
+          p.imagen,
+          p.precio
         FROM platillo p
         ORDER BY RAND()
         LIMIT 5
       `);
 
-      const platillosConImagen = randomDishes.map((platillo) => ({
-        id: platillo.id,
-        nombre: platillo.nombre,
-        descripcion: platillo.descripcion,
-        precio: platillo.precio,
-        promedio_calificacion: 0,
-        numero_calificaciones: 0,
-        imagen:
-          platillo.imagen && Buffer.isBuffer(platillo.imagen)
-            ? `data:image/jpeg;base64,${platillo.imagen.toString("base64")}`
-            : null,
-        mensaje: "No hay suficientes calificaciones, mostrando platillos aleatorios",
+      result = fallback.map(p => ({
+        ...p,
+        calificacion_promedio: 0,
+        total_calificaciones: 0
       }));
-
-      return res.json(platillosConImagen);
     }
 
-    // Si hay calificaciones, obtener los mejores platillos
-    const [rows] = await db.query(`
-      SELECT 
-        p.id,
-        p.nombre,
-        p.descripcion,
-        p.precio,
-        p.imagen,
-        ROUND(AVG(cp.calificacion), 2) AS promedio_calificacion,
-        COUNT(cp.id) AS numero_calificaciones
-      FROM platillo p
-      JOIN calificaciones_platillos cp ON p.id = cp.platillo_id
-      GROUP BY p.id
-      HAVING numero_calificaciones > 0
-      ORDER BY promedio_calificacion DESC, numero_calificaciones DESC
-      LIMIT 5
-    `);
-
-    const platillosConImagen = rows.map((platillo) => ({
-      id: platillo.id,
-      nombre: platillo.nombre,
-      descripcion: platillo.descripcion,
-      precio: platillo.precio,
-      promedio_calificacion: platillo.promedio_calificacion,
-      numero_calificaciones: platillo.numero_calificaciones,
-      imagen:
-        platillo.imagen && Buffer.isBuffer(platillo.imagen)
-          ? `data:image/jpeg;base64,${platillo.imagen.toString("base64")}`
-          : null,
-    }));
-
-    return res.json(platillosConImagen);
-  } catch (error) {
-    console.error("Error al obtener los platillos mejor calificados:", error);
-    return res.status(500).json({
-      error: "Error al obtener los platillos mejor calificados",
-      detalle: error.message,
+    // Convertir imágenes a base64
+    result = result.map((platillo) => {
+      if (platillo.imagen) {
+        if (Buffer.isBuffer(platillo.imagen)) {
+          platillo.imagen = `data:image/jpeg;base64,${platillo.imagen.toString("base64")}`;
+        } else if (platillo.imagen.data) {
+          platillo.imagen = `data:image/jpeg;base64,${Buffer.from(platillo.imagen.data).toString("base64")}`;
+        }
+      } else {
+        platillo.imagen = null;
+      }
+      return platillo;
     });
+
+    res.json(result);
+
+  } catch (error) {
+    console.error('Error al obtener los mejores platillos:', error);
+    res.status(500).json({ message: 'Error al obtener los mejores platillos' });
   }
 });
 
-// Iniciar servidor
+
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
   const networkInterfaces = os.networkInterfaces();
   let localIp = '0.0.0.0';
-  
+
   Object.keys(networkInterfaces).forEach(interfaceName => {
     networkInterfaces[interfaceName].forEach(iface => {
       if (iface.family === 'IPv4' && !iface.internal && iface.address.startsWith('192.168')) {
@@ -1057,15 +1073,5 @@ app.listen(PORT, '0.0.0.0', () => {
     });
   });
 
-  console.log(`
-  🚀 Servidor funcionando en:
-  - Local:    http://localhost:${PORT}
-  - Red:      http://${localIp}:${PORT}
-  
-  📡 Endpoints:
-  - POST /registro
-  - POST /verificar-codigo
-  - POST /login
-  - GET  /verify-token
-  `);
+  console.log(`Servidor escuchando en http://${localIp}:${PORT}`);
 });

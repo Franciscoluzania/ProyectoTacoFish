@@ -10,8 +10,7 @@ import { Text, View } from "react-native";
 const Tab = createBottomTabNavigator();
 
 const AppNavigation = () => {
-  const { carrito } = useCarrito(); // 👈 esto hará que se re-renderice si cambia el carrito
-
+  const { carrito } = useCarrito();
   const cantidadTotal = carrito.reduce((sum, item) => sum + (item.cantidad || 1), 0);
 
   return (
